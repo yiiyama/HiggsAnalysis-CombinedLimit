@@ -17,6 +17,7 @@ import h5py
 import h5py_cache
 from HiggsAnalysis.CombinedLimit.tfh5pyutils import maketensor,makesparsetensor
 from HiggsAnalysis.CombinedLimit.tfsparseutils import simple_sparse_tensor_dense_matmul, simple_sparse_slice0begin, simple_sparse_to_dense, SimpleSparseTensor
+from HiggsAnalysis.CombinedLimit.lsr1trustobs import LSR1TrustOBS
 import scipy
 import math
 import time
@@ -29,7 +30,7 @@ ROOT.gROOT.SetBatch(True)
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 argv.remove( '-b-' )
 
-from root_numpy import array2hist
+#from root_numpy import array2hist
 
 from array import array
 
@@ -279,7 +280,8 @@ if nbinsmasked>0:
   outputs.append(pmaskedexpnorm)
 
 grad = tf.gradients(l,x,gate_gradients=True)[0]
-hessian = jacobian(grad,x,gate_gradients=True,parallel_iterations=1,back_prop=False)
+hessian = jacobian(grad,x,gate_gradients=True,parallel_iterations=1,back_prop=True)
+hessrow0 = tf.gradients(grad[0],x,gate_gradients=True)[0]
 
 eigvals = tf.self_adjoint_eigvals(hessian)
 mineigv = tf.reduce_min(eigvals)
@@ -307,6 +309,9 @@ xtol = np.finfo(dtype).eps
 edmtol = math.sqrt(xtol)
 btol = 1e-8
 minimizer = ScipyTROptimizerInterface(l, var_list = [x], var_to_bounds={x: (lb,ub)}, options={'verbose': options.fitverbose, 'maxiter' : 100000, 'gtol' : 0., 'xtol' : xtol, 'barrier_tol' : btol})
+tfminimizer = LSR1TrustOBS(l,x,grad)
+opinit = tfminimizer.initialize(l,x,grad)
+opmin = tfminimizer.minimize(l,x,grad)
 
 scanvars = {}
 scannames = []
@@ -462,6 +467,10 @@ if options.nThreads>0:
 else:
   config = None
 
+#config = tf.ConfigProto(
+        #device_count = {'GPU': 0}
+    #)
+
 sess = tf.Session(config=config)
 
 #note that initializing all variables also triggers reading the hdf5 arrays from disk and populating the caches
@@ -548,6 +557,7 @@ for itoy in range(ntoys):
     neval = 1
     t0 = time.time()
     for i in range(neval):
+      print(i)
       hessval = sess.run([hessian])
     t = time.time() - t0
     print("%d hessian evals in %f seconds, %f seconds per eval" % (neval,t,t/max(1,neval)))
@@ -555,7 +565,18 @@ for itoy in range(ntoys):
     exit()
   
   if dofit:
-    ret = minimizer.minimize(sess)
+    #ret = minimizer.minimize(sess)
+    ifit = 0
+    sess.run(opinit)
+    while True:
+      isconverged,_ = sess.run(opmin)
+      lval = sess.run(l)
+      print([ifit,lval])
+      
+      if isconverged:
+        break
+      
+      ifit += 1
 
   #get fit output
   xval, outvalss, thetavals, theta0vals, nllval, nllvalfull = sess.run([x,outputs,theta,theta0,l,lfull])
@@ -615,8 +636,8 @@ for itoy in range(ntoys):
       if not options.toys > 0:
         variances2D     = parameterErrors[np.newaxis].T * parameterErrors
         correlationMatrix = np.divide(invhessoutval, variances2D)
-        array2hist(correlationMatrix, correlationHist)
-        array2hist(invhessoutval, covarianceHist)
+        #array2hist(correlationMatrix, correlationHist)
+        #array2hist(invhessoutval, covarianceHist)
     else:
       sigmasv = -99.*np.ones_like(outvals)
     
