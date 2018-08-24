@@ -15,9 +15,6 @@ class SR1TrustExact:
     self.grad_old = tf.Variable(tf.zeros_like(var), trainable=False)
     self.isfirstiter = tf.Variable(True, trainable=False)
     self.B = tf.Variable(tf.eye(int(var.shape[0]),dtype=var.dtype),trainable=False)
-    self.H = tf.Variable(tf.eye(int(var.shape[0]),dtype=var.dtype),trainable=False)
-    #self.eigval0 = tf.Variable(tf.ones([],dtype=var.dtype))
-    self.eigvec0 = tf.Variable((1./math.sqrt(int(var.shape[0])))*tf.ones_like(var))
     self.U = tf.Variable(tf.eye(int(var.shape[0]),dtype=var.dtype),trainable=False)
     self.e = tf.Variable(tf.ones_like(var),trainable=False)
     self.doscaling = tf.Variable(False)
@@ -30,10 +27,8 @@ class SR1TrustExact:
     if B is not None and H is not None:
       e,U = tf.self_adjoint_eig(B)
       alist.append(tf.assign(self.B,B))
-      alist.append(tf.assign(self.H,H))
       alist.append(tf.assign(self.e,e))
       alist.append(tf.assign(self.U,U))
-      alist.append(tf.assign(self.eigvec0, U[:,0]))
     return tf.group(alist)
   
     
@@ -145,7 +140,7 @@ class SR1TrustExact:
     def hesspapprox(B,v):
       return tf.reshape(tf.matmul(B,tf.reshape(v,[-1,1])),[-1])    
     
-    def doSR1Scaling(Bin,Hin,yin,dxin):
+    def doSR1Scaling(Bin,yin,dxin):
       s_norm2 = tf.reduce_sum(tf.square(dxin))
       y_norm2 = tf.reduce_sum(tf.square(yin))
       ys = tf.abs(tf.reduce_sum(yin*dxin))
@@ -153,10 +148,9 @@ class SR1TrustExact:
       scale = tf.where(invalid, tf.ones_like(ys), y_norm2/ys)
       scale = tf.Print(scale,[scale],message = "doing sr1 scaling")
       B = scale*Bin
-      H = Hin/scale
       return (B,H,tf.constant(False))
     
-    def doSR1Update(Bin,Hin,ein,Uin,yin,dxin):
+    def doSR1Update(Bin,ein,Uin,yin,dxin):
       y = tf.reshape(yin,[-1,1])
       dx = tf.reshape(dxin,[-1,1])
       Bx = tf.matmul(Bin,dx)
@@ -190,9 +184,9 @@ class SR1TrustExact:
         #deltaB = tf.Print(deltaB,[deltaB],message = "deltaB")
         #deltaB = tf.Print(deltaB,[deltaBalt],message = "deltaBalt")
         
-        rho = tf.Print(rho,[z],message = "z",summarize=1000)
-        rho = tf.Print(rho,[rho],message = "rho")
-        rho = tf.Print(rho,[den],message = "den")
+        #rho = tf.Print(rho,[z],message = "z",summarize=1000)
+        #rho = tf.Print(rho,[rho],message = "rho")
+        #rho = tf.Print(rho,[den],message = "den")
         
         
         flipsign = tf.reshape(den,[])<0.
@@ -202,29 +196,29 @@ class SR1TrustExact:
         dalt = -tf.reverse(d, axis=(0,))
         #dalt = tf.concat([dalt[1:],-tf.reshape(dalt[0],[-1])],axis=0)
         d = tf.where(flipsign, dalt, d)
-        d = tf.Print(d,[d],message="d",summarize=1000)
+        #d = tf.Print(d,[d],message="d",summarize=1000)
         
         xisqalt = tf.reverse(xisq,axis=(0,))
         xisq = tf.where(flipsign,xisqalt,xisq)
         
-        Hy = tf.matmul(Hin,y)
-        dxHy = dx - Hy
-        deltaH = tf.matmul(dxHy,dxHy,transpose_b=True)/tf.matmul(dxHy,y,transpose_a=True)
+        #Hy = tf.matmul(Hin,y)
+        #dxHy = dx - Hy
+        #deltaH = tf.matmul(dxHy,dxHy,transpose_b=True)/tf.matmul(dxHy,y,transpose_a=True)
         
         #Bd = tf.matrix_band_part(Bin,0,0)
         #Bd = Bin
         
-        etrueold = tf.self_adjoint_eigvals(Bin)
+        #etrueold = tf.self_adjoint_eigvals(Bin)
         #etrueold = tf.diag_part(Bd)
         
         B = Bin + deltaB
-        H = Hin + deltaH
+        #H = Hin + deltaH
         
-        etruenew = tf.self_adjoint_eigvals(B)
+        #etruenew = tf.self_adjoint_eigvals(B)
         
-        wtrue = 1. + signedrho*tf.reduce_sum(tf.reshape(xisq,[1,-1])/(tf.reshape(etrueold,[1,-1]) - tf.reshape(etruenew,[-1,1])),axis=-1)
+        #wtrue = 1. + signedrho*tf.reduce_sum(tf.reshape(xisq,[1,-1])/(tf.reshape(etrueold,[1,-1]) - tf.reshape(etruenew,[-1,1])),axis=-1)
         
-        B = tf.Print(B,[wtrue],message = "wtrue",summarize=1000)
+        #B = tf.Print(B,[wtrue],message = "wtrue",summarize=1000)
 
         
         def eUpdate():
@@ -257,17 +251,11 @@ class SR1TrustExact:
           a0 = 1.+s0
           b0 = -(xisqn1 + xisq1 + (1.+s0)*delta)
           c0 = xisqn1*delta
-          print(s0.shape)
-          print(a0.shape)
-          print(b0.shape)
-          print(c0.shape)
-          print(xisqn1.shape)
-          print(xisq1.shape)
-          print(delta.shape)
           t0n1 = (-b0 - tf.sqrt(tf.square(b0) - 4.*a0*c0))/(2*a0)
           
-          t0n = 1e-3*tf.ones([1],dtype=var.dtype)
+          #t0n = 0.1*tf.ones([1],dtype=var.dtype)
           #t0n = tf.zeros([1],dtype=var.dtype)
+          t0n = tf.reshape(xisq[-1],[-1])
           t0 = tf.concat([t0n1,t0n],axis=0)          
           
           #sq0 = tf.square(b0) - 4*a0*c0
@@ -281,7 +269,7 @@ class SR1TrustExact:
           
           loop_vars = [t0,w0,tf.constant(0)]
           def cond(t,w,j):
-            return (tf.sqrt(tf.reduce_sum(tf.square(w))) > 1e-14) & (j<50)
+            return (tf.sqrt(tf.reduce_sum(tf.square(w))) > 1e-10) & (j<50)
           
           
           def body(t,w,j):
@@ -294,12 +282,12 @@ class SR1TrustExact:
             w = 1. + phi + psi
             #wfull = 1. + rho*tf.reduce_sum(tf.reshape(xisq,[1,-1])/(tf.reshape(d,[1,-1]) - tf.reshape(d+rho*t,[-1,1])),axis=-1)
             
-            #w = tf.Print(w, [w], summarize=1000, message = "w")
+            #w = tf.Print(w, [w], summarize=5, message = "w")
             #w = tf.Print(w, [wfull], summarize=1000, message = "wfull")
             
-            #w = tf.Print(w, [psi], summarize=1000, message = "psi")
-            #w = tf.Print(w, [psifull], summarize=1000, message = "psifull")
-            #w = tf.Print(w, [phi], summarize=1000, message = "phi")
+            #w = tf.Print(w, [psi], summarize=5, message = "psi")
+            #w = tf.Print(w, [psifull], summarize=5, message = "psifull")
+            #w = tf.Print(w, [phi], summarize=5, message = "phi")
             
             psiprimem = tf.reshape(xisq,[1,-1])/tf.square(deltam - tf.reshape(t,[-1,1]))
             psiprime = tf.diag_part(tf.cumsum(psiprimem, axis=-1))
@@ -335,15 +323,15 @@ class SR1TrustExact:
             #t = tf.Print(t,[t],message = "t", summarize=1000)
             #t = tf.Print(t,[w],message="w", summarize=1000)
             magw = tf.sqrt(tf.reduce_sum(tf.square(w)))
-            t = tf.Print(t,[magw],message="magw", summarize=1000)
+            #t = tf.Print(t,[magw],message="magw")
             
             return (t,w,j+1)
             
             
           t,w,j = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
           #t = tf.Print(t,[t[0],w],message = "t0,w")
-          t = tf.Print(t,[w],message = "w",summarize=1000)
-          t = tf.Print(t,[t],message = "t",summarize=1000)
+          #t = tf.Print(t,[w],message = "w",summarize=5)
+          #t = tf.Print(t,[t],message = "t",summarize=5)
           eout = d + rho*t
           eoutalt = -tf.reverse(eout,axis=(0,))
           #eoutalt = d - rho*t
@@ -364,32 +352,31 @@ class SR1TrustExact:
         e,U = eUpdate()
         #U = Uin
         
-        return (B,H,e,U)
+        return (B,e,U)
       
-      B,H,e,U = tf.cond(dentest, lambda: (Bin,Hin,ein,Uin), doUpdate)
+      B,e,U = tf.cond(dentest, lambda: (Bin,ein,Uin), doUpdate)
       
-      return (B,H,e,U)
+      return (B,e,U)
     
     #grad = self.grad
     B = self.B
-    H = self.H
     esec = self.e
     Usec = self.U
     
-    esec = tf.Print(esec,[esec],summarize=1000,message="esecin")
+    #esec = tf.Print(esec,[esec],summarize=1000,message="esecin")
         
     #dgrad = grad - self.grad_old
     #dx = var - self.var_old
     doscaling = tf.constant(False)
     #B,H,doscaling = tf.cond(self.doscaling & self.doiter_old, lambda: doSR1Scaling(B,H,dgrad,dx), lambda: (B,H,self.doscaling))
-    B,H,esec,Usec = tf.cond(self.doiter_old, lambda: doSR1Update(B,H,esec,Usec,dgrad,dx), lambda: (B,H,esec,Usec))  
+    B,esec,Usec = tf.cond(self.doiter_old, lambda: doSR1Update(B,esec,Usec,dgrad,dx), lambda: (B,esec,Usec))  
     
     etrue,Utrue = tf.self_adjoint_eig(B)
-    B = tf.Print(B,[esec],message = "esec",summarize=1000)
-    B = tf.Print(B,[etrue],message = "etrue",summarize=1000)
+    esec = tf.Print(esec,[esec],message = "esec",summarize=10000)
+    esec = tf.Print(esec,[etrue],message = "etrue",summarize=10000)
     
-    B = tf.Print(B,[Usec],message = "Usec",summarize=1000)
-    B = tf.Print(B,[Utrue],message = "Utrue",summarize=1000)
+    esec = tf.Print(esec,[Usec[:,0]],message = "Usec",summarize=10000)
+    esec = tf.Print(esec,[Utrue[:,0]],message = "Utrue",summarize=10000)
     
     #psi = tf.Print(psi,[psi],message="psi: ")
     #M = tf.Print(M,[M],message="M: ")
@@ -406,181 +393,133 @@ class SR1TrustExact:
     
     def build_sol():
 
-      gradcol = tf.reshape(grad,[-1,1])
-      I = tf.eye(int(var.shape[0]),dtype=var.dtype)
+      lam = esec
+      U = Usec
+
+      #lam,U = tf.self_adjoint_eig(B) #TODO: check if what is returned here should actually be UT in the paper
+      #U = tf.transpose(U)
+
       
-      def phif(s):    
-        p = -tf.matrix_solve(B+s*I,gradcol)
-        p = tf.reshape(p,[-1])
-        pmagsq = tf.reduce_sum(tf.square(p))
+      #R = tf.Print(R,[detR],message = "detR")
+
+      
+      #Rinverse = tf.matrix_inverse(R)
+      
+      gradcol = tf.reshape(grad,[-1,1])
+      
+      a = tf.matmul(U, gradcol,transpose_a=True)
+      a = tf.reshape(a,[-1])
+      
+      amagsq = tf.reduce_sum(tf.square(a))
+      gmagsq = tf.reduce_sum(tf.square(grad))
+      
+      a = tf.Print(a,[amagsq,gmagsq],message = "amagsq,gmagsq")
+      
+      #a = tf.matmul(U, gradcol,transpose_a=False)
+      asq = tf.square(a)
+      
+
+      abarindices = tf.where(asq)
+      abarsq = tf.gather(asq,abarindices)
+      lambar = tf.gather(lam,abarindices)
+
+      abarsq = tf.reshape(abarsq,[-1])
+      lambar = tf.reshape(lambar, [-1])
+      
+      lambar, abarindicesu = tf.unique(lambar)
+      abarsq = tf.unsorted_segment_sum(abarsq,abarindicesu,tf.shape(lambar)[0])
+      
+      abar = tf.sqrt(abarsq)
+      
+      #abarsq = tf.square(abar)
+
+
+      #nv = tf.shape(ST)[0]
+      #I = tf.eye(int(var.shape[0]),dtype=var.dtype)
+      #B = gamma*I + tf.matmul(psi,tf.matmul(M,psi,transpose_b=True))
+      #B = tf.Print(B, [B],message="B: ", summarize=1000)
+      #efull = tf.self_adjoint_eigvals(B)
+      #lam = efull[:1+nv]
+      
+      e0 = lam[0]
+      sigma0 = tf.maximum(-e0,tf.zeros([],dtype=var.dtype))
+      
+      
+      #lambar, lamidxs = tf.unique(lam)
+      #abarsq = tf.segment_sum(asq,lamidxs)
+      
+      #abarsq = tf.Print(abarsq, [a, abar, lam, lambar], message = "a,abar,lam,lambar")
+      
+      
+      def phif(s):        
+        pmagsq = tf.reduce_sum(abarsq/tf.square(lambar+s))
         pmag = tf.sqrt(pmagsq)
         phipartial = tf.reciprocal(pmag)
+        singular = tf.reduce_any(tf.equal(-s,lambar))
+        #singular = tf.logical_or(singular, tf.is_nan(phipartial))
+        #singular = tf.logical_or(singular, tf.is_inf(phipartial))
+        phipartial = tf.where(singular, tf.zeros_like(phipartial), phipartial)
         phi = phipartial - tf.reciprocal(trustradius_out)
-        return (p,phi)
+        return phi
       
       def phiphiprime(s):
-        p,phi = phif(s)
-        phiprime = tf.gradients(phi,s,gate_gradients=True)[0]
-        return (p, phi, phiprime)
+        phi = phif(s)
+        pmagsq = tf.reduce_sum(abarsq/tf.square(lambar+s))
+        phiprime = tf.pow(pmagsq,-1.5)*tf.reduce_sum(abarsq/tf.pow(lambar+s,3))
+        return (phi, phiprime)
         
-      def reduction(p):
-        return -(tf.reduce_sum(grad*p) + 0.5*tf.reduce_sum(tf.reshape(tf.matmul(B,tf.reshape(p,[-1,1])),[-1])*p) )
-        
-      #diag = tf.diag_part(B)
-      #eig0bound = tf.reduce_min(diag - tf.reshape(tf.reduce_sum(tf.abs(B), axis=-1),[-1]) + tf.abs(diag))
       
-      def lancosz():
-        niter = 166
+      phisigma0 = phif(sigma0)
+      #usesolu = e0>0. & phisigma0 >= 0.
+      usesolu = tf.logical_and(e0>0. , phisigma0 >= 0.)
+      #usesolu = tf.Print(usesolu,[sigma0,phisigma0,usesolu], message = "sigma0, phisigma0,usesolu: ")
 
-        gradnorm = gradcol/tf.sqrt(tf.reduce_sum(tf.square(gradcol)))      
-        #v0 = tf.reshape(self.eigvec0,[-1,1])
-        v0  = gradnorm
-        #v0 = tf.random_normal([int(var.shape[0]),1],dtype=tf.float64)
-        v = v0
-        #v = tf.random_normal([int(var.shape[0]),1],dtype=tf.float64)
-        #v = v/tf.sqrt(tf.reduce_sum(tf.square(v)))
-        #v = gradnorm
-        wp = tf.matmul(B,v)
-        alpha = tf.reshape(tf.matmul(wp,v,transpose_a=True),[])
-        w = wp - alpha*v
-        j = tf.constant(0)
-        
-        alphas = tf.TensorArray(dtype=var.dtype,size=niter+1)
-        betas = tf.TensorArray(dtype=var.dtype,size=niter)
-        vs = tf.TensorArray(dtype=var.dtype,size=niter+1)
-        
-        alphas = alphas.write(0,alpha)
-        vs = vs.write(0,v)
-        
-        loop_vars = [v,w,vs,alphas,betas,j]
-        def cond(v,w,vs,alphas,betas,j):
-          return j<min(niter,var.shape[0])
+      #def solu():
+        #return -tf.matmul(H,gradcol)
       
-        def body(v,w,vs,alphas,betas,j):
-          beta = tf.sqrt(tf.reduce_sum(tf.square(w)))
-          vold = v
-          #valt = gradnorm
-          valt = tf.random_normal([int(var.shape[0]),1],dtype=tf.float64)
-          valt = valt - tf.reduce_sum(valt*v)*v
-          valt = valt/tf.sqrt(tf.reduce_sum(tf.square(valt)))
-          valtv = tf.reduce_sum(valt*v)
-          #beta = tf.Print(beta,[beta],message = "beta")
-          #nullbeta = tf.equal(beta,tf.zeros_like(beta))
-          nullbeta = beta < 1e-3
-          #assertop = tf.Assert(tf.logical_not(nullbeta),[beta])
-          #with tf.control_dependencies([assertop]):
-            #v = tf.where(nullbeta, valt, w/beta)
-          v = tf.where(nullbeta, valt, w/beta)
-          #v = tf.Print(v,[valtv],message="valtv")
-          wp = tf.matmul(B,v)
-          alpha = tf.reshape(tf.matmul(wp,v,transpose_a=True),[])
-          w = wp - alpha*v - beta*vold
-          alphas = alphas.write(j+1,alpha)
-          betas = betas.write(j,beta)
-          vs = vs.write(j+1,v)
-          return (v,w,vs,alphas,betas,j+1)
-        
-        
-        v,w,vs,alphas,betas,j = tf.while_loop(cond, body, loop_vars, parallel_iterations=32, back_prop=False)
-        alphas = alphas.stack()
-        betas = betas.stack()
-        #vs = vs.stack()
-        
-        alphas = tf.Print(alphas,[alphas],message="alphas")
-        alphas = tf.Print(alphas,[betas],message="betas")
-        
-        Talpha = tf.diag(alphas)
-        Tbeta = tf.diag(betas)
-        Tlower = tf.pad(Tbeta, [[1,0],[0,1]])
-        Tupper = tf.pad(Tbeta, [[0,1],[1,0]])
-        T = Talpha + Tlower + Tupper
-        #only the lower triangular part of the full tridiagonal matrix need to be filled
-        #T = Talpha + Tlower
-        #T = tf.Print(T,[T],message="T",summarize=1000)
-        #e,U = tf.self_adjoint_eig(T)
-        e = tf.self_adjoint_eigvals(T)
-        #e = tf.Print(e,[e,etrue],message="e, etrue",summarize=1000)
-        e0 = e[0]
-        
-        etrue, Utrue = tf.self_adjoint_eig(B)
-        e0val = etrue[0]
-        e0 = tf.Print(e0,[e0,e0val],message = "e0,e0val")
-        
-        
-        #v0 = tf.reshape(vs.read(0),[-1])
-        v0 = tf.matrix_solve(B-e0*I,v0)
-        v0 = tf.reshape(v0,[-1])
-        v0 = v0/tf.sqrt(tf.reduce_sum(tf.square(v0)))
-        v0val = Utrue[:,0]
-        v0 = tf.Print(v0,[v0],message = "v0")
-        v0 = tf.Print(v0,[v0val],message = "v0val")
-        return (e0,v0)
-          
-      e0, eigvec0 = lancosz()
-      
-      #etrue = tf.Print(etrue,[etrue],message="etrue")
-      #print(dosol.shape)
-      
-      #phisigma0 = phif(sigma0)
- 
-      pu = tf.reshape(-tf.matmul(H,gradcol),[-1])
-      pmagu = tf.sqrt(tf.reduce_sum(tf.square(pu)))
-      soluvalid = pmagu <= trustradius_out
-      redu = reduction(pu)
-      
-      dosol = e0 < 0.
-      dosol = tf.logical_or(dosol,tf.logical_not(soluvalid))
- 
-      def sol():
+      def sigma():
         tol = 1e-8
         maxiter = 50
 
-        a0 = tf.reduce_sum(eigvec0*grad)
-        sigmainit = tf.abs(a0)/trustradius_out - e0
-        #sigmainit = -e0 + 1e-8
-        #sigmainit = -2.*e0
-        #phiinit = -99.*tf.ones([1],dtype=var.dtype)
-        phiinit = tf.constant(-99.,dtype=var.dtype)
-        pinit = tf.zeros_like(var)
-                
-        sigmainit = tf.Print(sigmainit,[sigmainit,phiinit],message = "sigmainit, phinit: ")
+        sigmainit = tf.reduce_max(tf.abs(a)/trustradius_out - lam)
+        sigmainit = tf.maximum(sigmainit,tf.zeros_like(sigmainit))
+        phiinit = phif(sigmainit)
+        
+        #sigmainit = tf.Print(sigmainit,[sigmainit,phiinit],message = "sigmainit, phinit: ")
 
         
-        loop_vars = [sigmainit, phiinit, pinit, tf.zeros([],dtype=tf.int32)]
+        loop_vars = [sigmainit, phiinit, tf.zeros([],dtype=tf.int32)]
         
-        def cond(sigma,phi,p,j):
+        def cond(sigma,phi,j):
           #phi = tf.Print(phi,[phi],message = "checking phi in cond()")
-          #return tf.logical_and(phi < -tol, j<maxiter)
-          return tf.logical_and(tf.abs(phi) > tol, j<maxiter)
+          return tf.logical_and(phi < -tol, j<maxiter)
+          #return tf.logical_and(tf.abs(phi) > tol, j<maxiter)
         
-        def body(sigma,phi,p,j):   
+        def body(sigma,phi,j):   
           #sigma = tf.Print(sigma, [sigma, phi], message = "sigmain, phiin: ")
-          pout, phiout, phiprimeout = phiphiprime(sigma)
+          phiout, phiprimeout = phiphiprime(sigma)
           sigmaout = sigma - phiout/phiprimeout
-          sigmaout = tf.Print(sigmaout, [sigmaout,phiout, phiprimeout], message = "sigmaout, phiout, phiprimeout: ")
-          return (sigmaout,phiout,pout,j+1)
+          #sigmaout = tf.Print(sigmaout, [sigmaout,phiout, phiprimeout], message = "sigmaout, phiout, phiprimeout: ")
+          return (sigmaout,phiout,j+1)
           
-        sigmaiter, phiiter,piter,jiter = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
+        sigmaiter, phiiter, jiter = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
         #sigmaiter = tf.Print(sigmaiter,[sigmaiter,phiiter],message = "sigmaiter,phiiter")
         
-        p = -tf.matrix_solve(B+sigmaiter*I,gradcol)
-        p = tf.reshape(p,[-1])
-        red = reduction(p)
+        #coeffs = -a/(lam+sigmaiter)
+        #coeffs = tf.reshape(coeffs,[1,-1])
+        #p = tf.reduce_sum(coeffs*U, axis=-1)
         
-        return (p,red)
+        return sigmaiter
       
-      pbound, redbound = tf.cond(dosol, sol, lambda: (tf.zeros_like(var), tf.zeros_like(loss)) )
-      #pbound,redbound = sol()
-      
-      
-      usesolu = redu >= redbound
-      usesolu = tf.logical_and(usesolu, soluvalid)
-      p = tf.where(usesolu, pu, pbound)
-      predicted_reduction_out = tf.where(usesolu,redu,redbound)
+      #p = tf.cond(usesolu, solu, sol)
+      sigma = tf.cond(usesolu, lambda: tf.zeros([],dtype=var.dtype), sigma)
       #p = tf.reshape(p,[-1])
       
-      magp = tf.sqrt(tf.reduce_sum(tf.square(p)))
-      p = tf.Print(p,[magp],message = "magp")
+      coeffs = -a/(lam+sigma)
+      coeffs = tf.reshape(coeffs,[1,-1])
+      p = tf.reduce_sum(coeffs*U, axis=-1)
+      #magp = tf.sqrt(tf.reduce_sum(tf.square(p)))
+      #p = tf.Print(p,[magp],message = "magp")
 
       #e0val = efull[0]
       #e0val = e0
@@ -593,15 +532,12 @@ class SR1TrustExact:
       #p  = tf.Print(p,[e0,e0val,sigma0,sigma,tau], message = "e0, e0val, sigma0, sigma, tau")
       #p  = tf.Print(p,[lam,efull], message = "lam, efull")
 
-      #predicted_reduction_out = -(tf.reduce_sum(grad*p) + 0.5*tf.reduce_sum(tf.reshape(tf.matmul(B,tf.reshape(p,[-1,1])),[-1])*p) )
+      predicted_reduction_out = -(tf.reduce_sum(grad*p) + 0.5*tf.reduce_sum(tf.reshape(tf.matmul(B,tf.reshape(p,[-1,1])),[-1])*p) )
       
-      return [var+p, predicted_reduction_out, tf.logical_not(usesolu), grad,eigvec0]
+      return [var+p, predicted_reduction_out, tf.logical_not(usesolu), grad]
 
-    loopout = tf.cond(doiter, lambda: build_sol(), lambda: [self.var_old+0., tf.zeros_like(loss),tf.constant(False),self.grad_old,self.eigvec0])
-    var_out, predicted_reduction_out, atboundary_out, grad_out, eigvec0 = loopout
-        
-    #var_out = tf.Print(var_out,[],message="var_out")
-    #loopout[0] = var_out
+    loopout = tf.cond(doiter, lambda: build_sol(), lambda: [self.var_old+0., tf.zeros_like(loss),tf.constant(False),self.grad_old])
+    var_out, predicted_reduction_out, atboundary_out, grad_out = loopout
     
     alist = []
     
@@ -611,7 +547,6 @@ class SR1TrustExact:
       alist.append(tf.assign(self.loss_old,loss))
       alist.append(tf.assign(self.doiter_old, doiter))
       alist.append(tf.assign(self.B,B))
-      alist.append(tf.assign(self.H,H))
       alist.append(tf.assign(self.doscaling,doscaling))
       alist.append(tf.assign(self.grad_old,grad_out))
       alist.append(tf.assign(self.predicted_reduction,predicted_reduction_out))
@@ -620,7 +555,6 @@ class SR1TrustExact:
       alist.append(tf.assign(self.isfirstiter,False)) 
       alist.append(tf.assign(self.e,esec)) 
       alist.append(tf.assign(self.U,Usec)) 
-      #alist.append(tf.assign(self.eigvec0,eigvec0)) 
        
     clist = []
     clist.extend(loopout)
