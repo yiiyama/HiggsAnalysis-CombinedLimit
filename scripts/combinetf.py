@@ -603,68 +603,68 @@ for itoy in range(ntoys):
     ifit = 0
     sess.run(opinit)
     
-    e,u = tf.self_adjoint_eig(tfminimizer.B)
-    ea = tf.self_adjoint_eigvals(tfminimizer.B)
+    #e,u = tf.self_adjoint_eig(tfminimizer.B)
+    #ea = tf.self_adjoint_eigvals(tfminimizer.B)
     
-    chol = tf.cholesky(tfminimizer.B - 4.*e[0]*tf.eye(int(x.shape[0]),dtype=dtype))
-    matmul = tf.matmul(tfminimizer.H,tf.reshape(tfminimizer.grad_old,[-1,1]))
-    matsolve = tf.matrix_solve(tfminimizer.B,tf.reshape(tfminimizer.grad_old,[-1,1]))
-    onev = tf.ones(x.shape,dtype=x.dtype)/math.sqrt(int(x.shape[0]))
-    hessv = tf.gradients(grad*tf.stop_gradient(onev),x,gate_gradients=True)
+    #chol = tf.cholesky(tfminimizer.B - 4.*e[0]*tf.eye(int(x.shape[0]),dtype=dtype))
+    #matmul = tf.matmul(tfminimizer.H,tf.reshape(tfminimizer.grad_old,[-1,1]))
+    #matsolve = tf.matrix_solve(tfminimizer.B,tf.reshape(tfminimizer.grad_old,[-1,1]))
+    #onev = tf.ones(x.shape,dtype=x.dtype)/math.sqrt(int(x.shape[0]))
+    #hessv = tf.gradients(grad*tf.stop_gradient(onev),x,gate_gradients=True)
     
-    t0 = time.time()
-    neval = 10
-    for i in range(neval):
-      #print(i)
-      sess.run([e,u])
-    t = time.time()-t0
-    t /= neval
-    print("eig time = %f" % t)
+    #t0 = time.time()
+    #neval = 10
+    #for i in range(neval):
+      ##print(i)
+      #sess.run([e,u])
+    #t = time.time()-t0
+    #t /= neval
+    #print("eig time = %f" % t)
     
-    t0 = time.time()
-    neval = 10
-    for i in range(neval):
-      #print(i)
-      sess.run(ea)
-    t = time.time()-t0
-    t /= neval
-    print("eigval time = %f" % t)
+    #t0 = time.time()
+    #neval = 10
+    #for i in range(neval):
+      ##print(i)
+      #sess.run(ea)
+    #t = time.time()-t0
+    #t /= neval
+    #print("eigval time = %f" % t)
     
-    t0 = time.time()
-    neval = 10
-    for i in range(neval):
-      #print(i)
-      sess.run(chol)
-    t = time.time()-t0
-    t /= neval
-    print("chol time = %f" % t)
+    #t0 = time.time()
+    #neval = 10
+    #for i in range(neval):
+      ##print(i)
+      #sess.run(chol)
+    #t = time.time()-t0
+    #t /= neval
+    #print("chol time = %f" % t)
     
-    t0 = time.time()
-    neval = 1000
-    for i in range(neval):
-      #print(i)
-      sess.run(matmul)
-    t = time.time()-t0
-    t /= neval
-    print("matmul time = %f" % t)
+    #t0 = time.time()
+    #neval = 1000
+    #for i in range(neval):
+      ##print(i)
+      #sess.run(matmul)
+    #t = time.time()-t0
+    #t /= neval
+    #print("matmul time = %f" % t)
 
-    t0 = time.time()
-    neval = 1000
-    for i in range(neval):
-      #print(i)
-      sess.run(matsolve)
-    t = time.time()-t0
-    t /= neval
-    print("matsolve time = %f" % t)
+    #t0 = time.time()
+    #neval = 1000
+    #for i in range(neval):
+      ##print(i)
+      #sess.run(matsolve)
+    #t = time.time()-t0
+    #t /= neval
+    #print("matsolve time = %f" % t)
     
-    t0 = time.time()
-    neval = 100
-    for i in range(neval):
-      #print(i)
-      sess.run(hessv)
-    t = time.time()-t0
-    t /= neval
-    print("hessv time = %f" % t)
+    #t0 = time.time()
+    #neval = 100
+    #for i in range(neval):
+      ##print(i)
+      #sess.run(hessv)
+    #t = time.time()-t0
+    #t /= neval
+    #print("hessv time = %f" % t)
  
     while True:
       isconverged,_ = sess.run(opmin)

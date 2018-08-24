@@ -18,6 +18,8 @@ class SR1TrustExact:
     self.H = tf.Variable(tf.eye(int(var.shape[0]),dtype=var.dtype),trainable=False)
     #self.eigval0 = tf.Variable(tf.ones([],dtype=var.dtype))
     self.eigvec0 = tf.Variable((1./math.sqrt(int(var.shape[0])))*tf.ones_like(var))
+    self.U = tf.Variable(tf.eye(int(var.shape[0]),dtype=var.dtype),trainable=False)
+    self.e = tf.Variable(tf.ones_like(var),trainable=False)
     self.doscaling = tf.Variable(False)
     
   def initialize(self, loss, var, grad, B = None, H = None):
@@ -29,6 +31,8 @@ class SR1TrustExact:
       e,U = tf.self_adjoint_eig(B)
       alist.append(tf.assign(self.B,B))
       alist.append(tf.assign(self.H,H))
+      alist.append(tf.assign(self.e,e))
+      alist.append(tf.assign(self.U,U))
       alist.append(tf.assign(self.eigvec0, U[:,0]))
     return tf.group(alist)
   
@@ -152,39 +156,240 @@ class SR1TrustExact:
       H = Hin/scale
       return (B,H,tf.constant(False))
     
-    def doSR1Update(Bin,Hin,yin,dxin):
+    def doSR1Update(Bin,Hin,ein,Uin,yin,dxin):
       y = tf.reshape(yin,[-1,1])
       dx = tf.reshape(dxin,[-1,1])
       Bx = tf.matmul(Bin,dx)
       dyBx = y - Bx
       den = tf.matmul(dyBx,dx,transpose_a=True)
-      deltaB = tf.matmul(dyBx,dyBx,transpose_b=True)/den
+      
       dennorm = tf.sqrt(tf.reduce_sum(tf.square(dx)))*tf.sqrt(tf.reduce_sum(tf.square(dyBx)))
       dentest = tf.less(tf.abs(den),1e-8*dennorm)
       dentest = tf.reshape(dentest,[])
       dentest = tf.logical_or(dentest,tf.equal(actual_reduction,0.))
-      deltaB = tf.where(dentest,tf.zeros_like(deltaB),deltaB)
-      #deltaB = tf.where(self.doiter_old, deltaB, tf.zeros_like(deltaB))
       
-      Hy = tf.matmul(Hin,y)
-      dxHy = dx - Hy
-      deltaH = tf.matmul(dxHy,dxHy,transpose_b=True)/tf.matmul(dxHy,y,transpose_a=True)
-      deltaH = tf.where(dentest,tf.zeros_like(deltaH),deltaH)
-      #deltaH = tf.where(self.doiter_old, deltaH, tf.zeros_like(deltaH))
+      def doUpdate():
+        deltaB = tf.matmul(dyBx,dyBx,transpose_b=True)/den
+        dyBxmagsq = tf.reduce_sum(tf.square(dyBx))
+        #xisq = tf.square(dyBx)/dyBxmagsq
+        #z = tf.sqrt(xisq)
+        b = dyBx/tf.sqrt(dyBxmagsq)
+        #z = tf.matmul(Uin,tf.reshape(b,[-1,1]),transpose_a=True)
+        z = tf.matrix_solve(Uin,b)
+        xisq = tf.square(z)
+        #zmag = tf.sqrt(tf.reduce_sum(xisq))
+        #xisq = tf.Print(xisq,[zmag],message = "zmag")
+        #rho = tf.sqrt(dyBxmagsq/tf.abs(den))
+        #rho = dyBxmagsq/tf.abs(den)
+        rho = dyBxmagsq/den
+        rho = tf.reshape(rho,[])
+        signedrho = rho
+        rho = tf.abs(rho)
+        
+        #deltaBalt = rho*tf.matmul(z,z,transpose_b=True)
+        #deltaB = tf.Print(deltaB,[deltaB],message = "deltaB")
+        #deltaB = tf.Print(deltaB,[deltaBalt],message = "deltaBalt")
+        
+        rho = tf.Print(rho,[z],message = "z",summarize=1000)
+        rho = tf.Print(rho,[rho],message = "rho")
+        rho = tf.Print(rho,[den],message = "den")
+        
+        
+        flipsign = tf.reshape(den,[])<0.
+        #rho = tf.where(flipsign,-rho, rho)
+        #d = tf.where(flipsign, -ein, ein)
+        d = ein
+        dalt = -tf.reverse(d, axis=(0,))
+        #dalt = tf.concat([dalt[1:],-tf.reshape(dalt[0],[-1])],axis=0)
+        d = tf.where(flipsign, dalt, d)
+        d = tf.Print(d,[d],message="d",summarize=1000)
+        
+        xisqalt = tf.reverse(xisq,axis=(0,))
+        xisq = tf.where(flipsign,xisqalt,xisq)
+        
+        Hy = tf.matmul(Hin,y)
+        dxHy = dx - Hy
+        deltaH = tf.matmul(dxHy,dxHy,transpose_b=True)/tf.matmul(dxHy,y,transpose_a=True)
+        
+        #Bd = tf.matrix_band_part(Bin,0,0)
+        #Bd = Bin
+        
+        etrueold = tf.self_adjoint_eigvals(Bin)
+        #etrueold = tf.diag_part(Bd)
+        
+        B = Bin + deltaB
+        H = Hin + deltaH
+        
+        etruenew = tf.self_adjoint_eigvals(B)
+        
+        wtrue = 1. + signedrho*tf.reduce_sum(tf.reshape(xisq,[1,-1])/(tf.reshape(etrueold,[1,-1]) - tf.reshape(etruenew,[-1,1])),axis=-1)
+        
+        B = tf.Print(B,[wtrue],message = "wtrue",summarize=1000)
+
+        
+        def eUpdate():
+          
+          
+          #t0 = tf.zeros_like(var)+1e-6
+          #t0 = tf.reshape(xisq,[-1])
+          w0 = tf.ones_like(var)
+          
+          en1 = d[:-1]
+          e1 = d[1:]
+          delta = (e1 - en1)/rho
+          xisqn1 = tf.reshape(xisq[:-1],[-1])
+          xisq1 = tf.reshape(xisq[1:],[-1])
+          
+          ei = tf.reshape(d,[-1,1])
+          ej = tf.reshape(d,[1,-1])
+          deltam = (ej-ei)/rho
+          deltamn1 = deltam[:-1]
+          
+          #t0n1 = 1e-2*delta
+          
+          s0mden = deltamn1 - tf.reshape(delta,[-1,1])
+          #s0m = tf.reshape(xisqn1,[-1,1])/s0mden
+          s0m = tf.reshape(xisq,[1,-1])/s0mden
+          s0m = tf.where(tf.equal(s0mden,0.),tf.zeros_like(s0m),s0m)
+          s0m = s0m - tf.matrix_band_part(s0m,1,0)
+          s0 = tf.reduce_sum(s0m,axis=-1)
+          
+          a0 = 1.+s0
+          b0 = -(xisqn1 + xisq1 + (1.+s0)*delta)
+          c0 = xisqn1*delta
+          print(s0.shape)
+          print(a0.shape)
+          print(b0.shape)
+          print(c0.shape)
+          print(xisqn1.shape)
+          print(xisq1.shape)
+          print(delta.shape)
+          t0n1 = (-b0 - tf.sqrt(tf.square(b0) - 4.*a0*c0))/(2*a0)
+          
+          t0n = 1e-3*tf.ones([1],dtype=var.dtype)
+          #t0n = tf.zeros([1],dtype=var.dtype)
+          t0 = tf.concat([t0n1,t0n],axis=0)          
+          
+          #sq0 = tf.square(b0) - 4*a0*c0
+          
+          #t0 = tf.Print(t0,[s0],message = "s0",summarize=1000)
+          #t0 = tf.Print(t0,[a0],message = "a0",summarize=1000)
+          #t0 = tf.Print(t0,[b0],message = "b0",summarize=1000)
+          #t0 = tf.Print(t0,[c0],message = "c0",summarize=1000)
+          #t0 = tf.Print(t0,[sq0],message = "sq0",summarize=1000)
+          #t0 = tf.Print(t0,[t0],message = "t0",summarize=1000)
+          
+          loop_vars = [t0,w0,tf.constant(0)]
+          def cond(t,w,j):
+            return (tf.sqrt(tf.reduce_sum(tf.square(w))) > 1e-14) & (j<50)
+          
+          
+          def body(t,w,j):
+            psim = tf.reshape(xisq,[1,-1])/(deltam - tf.reshape(t,[-1,1]))
+            #psim = xisq/(deltam + t)
+            psi = tf.diag_part(tf.cumsum(psim,axis=-1))
+            psifull = tf.reduce_sum(psim,axis=-1)
+            phi = psifull - psi
+            #phi = tf.where(tf.is_nan(phi),tf.zeros_like(phi),phi)
+            w = 1. + phi + psi
+            #wfull = 1. + rho*tf.reduce_sum(tf.reshape(xisq,[1,-1])/(tf.reshape(d,[1,-1]) - tf.reshape(d+rho*t,[-1,1])),axis=-1)
+            
+            #w = tf.Print(w, [w], summarize=1000, message = "w")
+            #w = tf.Print(w, [wfull], summarize=1000, message = "wfull")
+            
+            #w = tf.Print(w, [psi], summarize=1000, message = "psi")
+            #w = tf.Print(w, [psifull], summarize=1000, message = "psifull")
+            #w = tf.Print(w, [phi], summarize=1000, message = "phi")
+            
+            psiprimem = tf.reshape(xisq,[1,-1])/tf.square(deltam - tf.reshape(t,[-1,1]))
+            psiprime = tf.diag_part(tf.cumsum(psiprimem, axis=-1))
+            psiprimefull = tf.reduce_sum(psiprimem,axis=-1)
+            phiprime = psiprimefull - psiprime
+            #phiprime = tf.where(tf.is_nan(phiprime),tf.zeros_like(phiprime),phiprime)
+            
+            #first n-1 terms
+            psin1 = psi[:-1]
+            phin1 = phi[:-1]
+            psiprimen1 = psiprime[:-1]
+            phiprimen1 = phiprime[:-1]
+            wn1 = w[:-1]
+            tn1 = t[:-1]
+            Delta = delta - tn1
+
+            c = 1. + phin1 - Delta*phiprimen1
+            b = (Delta*wn1*psin1)/(psiprimen1*c)
+            a = (Delta*(1.+phin1)+tf.square(psin1)/psiprimen1)/c + psin1/psiprimen1
+            tn1 = tn1 + 2.*b/(a + tf.sqrt(tf.square(a) - 4.*b))
+            
+            #tn1 = tf.Print(tn1,[c],message = "c",summarize=1000)
+            #tn1 = tf.Print(tn1,[b],message = "b",summarize=1000)
+            #tn1 = tf.Print(tn1,[a],message = "a",summarize=1000)
+            
+            #last term
+            psin = psi[-1]
+            psiprimen = psiprime[-1]
+            tn = t[-1] + (1.+psin)*psin/psiprimen
+            tn = tf.reshape(tn,[-1])
+            
+            t = tf.concat([tn1,tn],axis=0)
+            #t = tf.Print(t,[t],message = "t", summarize=1000)
+            #t = tf.Print(t,[w],message="w", summarize=1000)
+            magw = tf.sqrt(tf.reduce_sum(tf.square(w)))
+            t = tf.Print(t,[magw],message="magw", summarize=1000)
+            
+            return (t,w,j+1)
+            
+            
+          t,w,j = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
+          #t = tf.Print(t,[t[0],w],message = "t0,w")
+          t = tf.Print(t,[w],message = "w",summarize=1000)
+          t = tf.Print(t,[t],message = "t",summarize=1000)
+          eout = d + rho*t
+          eoutalt = -tf.reverse(eout,axis=(0,))
+          #eoutalt = d - rho*t
+          #eoutalt = -(tf.reverse(d,axis=(0,)) + rho*t)
+          #eoutalt = -tf.reverse(d,axis=(0,)) - rho*t
+          eout = tf.where(flipsign,eoutalt,eout)
+          
+          #now compute eigenvectors
+          Dinv = tf.reciprocal(tf.reshape(ein,[1,-1]) - tf.reshape(eout,[-1,1]))
+          Dinvz = Dinv*tf.reshape(z,[1,-1])
+          Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1))
+          uout = tf.matmul(Uin,Dinvz,transpose_b=True)/Dinvzmag
+          
+
+          #eout = tf.where(flipsign,-eout,eout)
+          return (eout,uout)
+        
+        e,U = eUpdate()
+        #U = Uin
+        
+        return (B,H,e,U)
       
-      B = Bin + deltaB
-      H = Hin + deltaH
-      return (B,H)
+      B,H,e,U = tf.cond(dentest, lambda: (Bin,Hin,ein,Uin), doUpdate)
+      
+      return (B,H,e,U)
     
     #grad = self.grad
     B = self.B
     H = self.H
+    esec = self.e
+    Usec = self.U
     
+    esec = tf.Print(esec,[esec],summarize=1000,message="esecin")
+        
     #dgrad = grad - self.grad_old
     #dx = var - self.var_old
     doscaling = tf.constant(False)
     #B,H,doscaling = tf.cond(self.doscaling & self.doiter_old, lambda: doSR1Scaling(B,H,dgrad,dx), lambda: (B,H,self.doscaling))
-    B,H = tf.cond(self.doiter_old, lambda: doSR1Update(B,H,dgrad,dx), lambda: (B,H))  
+    B,H,esec,Usec = tf.cond(self.doiter_old, lambda: doSR1Update(B,H,esec,Usec,dgrad,dx), lambda: (B,H,esec,Usec))  
+    
+    etrue,Utrue = tf.self_adjoint_eig(B)
+    B = tf.Print(B,[esec],message = "esec",summarize=1000)
+    B = tf.Print(B,[etrue],message = "etrue",summarize=1000)
+    
+    B = tf.Print(B,[Usec],message = "Usec",summarize=1000)
+    B = tf.Print(B,[Utrue],message = "Utrue",summarize=1000)
     
     #psi = tf.Print(psi,[psi],message="psi: ")
     #M = tf.Print(M,[M],message="M: ")
@@ -228,8 +433,8 @@ class SR1TrustExact:
         niter = 166
 
         gradnorm = gradcol/tf.sqrt(tf.reduce_sum(tf.square(gradcol)))      
-        v0 = tf.reshape(self.eigvec0,[-1,1])
-        
+        #v0 = tf.reshape(self.eigvec0,[-1,1])
+        v0  = gradnorm
         #v0 = tf.random_normal([int(var.shape[0]),1],dtype=tf.float64)
         v = v0
         #v = tf.random_normal([int(var.shape[0]),1],dtype=tf.float64)
@@ -413,7 +618,9 @@ class SR1TrustExact:
       alist.append(tf.assign(self.atboundary_old, atboundary_out))
       alist.append(tf.assign(self.trustradius, trustradius_out))
       alist.append(tf.assign(self.isfirstiter,False)) 
-      alist.append(tf.assign(self.eigvec0,eigvec0)) 
+      alist.append(tf.assign(self.e,esec)) 
+      alist.append(tf.assign(self.U,Usec)) 
+      #alist.append(tf.assign(self.eigvec0,eigvec0)) 
        
     clist = []
     clist.extend(loopout)
