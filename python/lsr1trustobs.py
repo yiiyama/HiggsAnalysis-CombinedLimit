@@ -169,7 +169,8 @@ class SR1TrustExact:
         #z = tf.sqrt(xisq)
         b = dyBx/tf.sqrt(dyBxmagsq)
         #z = tf.matmul(Uin,tf.reshape(b,[-1,1]),transpose_a=True)
-        z = tf.matrix_solve(Uin,b)
+        #z = tf.matrix_solve(Uin,b)
+        z = tf.matmul(Uin, b, transpose_a=True)
         xisq = tf.square(z)
         #zmag = tf.sqrt(tf.reduce_sum(xisq))
         #xisq = tf.Print(xisq,[zmag],message = "zmag")
@@ -234,9 +235,9 @@ class SR1TrustExact:
           xisqn1 = tf.reshape(xisq[:-1],[-1])
           xisq1 = tf.reshape(xisq[1:],[-1])
           
-          ei = tf.reshape(d,[-1,1])
-          ej = tf.reshape(d,[1,-1])
-          deltam = (ej-ei)/rho
+          di = tf.reshape(d,[-1,1])
+          dj = tf.reshape(d,[1,-1])
+          deltam = (dj-di)/rho
           deltamn1 = deltam[:-1]
           
           #t0n1 = 1e-2*delta
@@ -252,6 +253,9 @@ class SR1TrustExact:
           b0 = -(xisqn1 + xisq1 + (1.+s0)*delta)
           c0 = xisqn1*delta
           t0n1 = (-b0 - tf.sqrt(tf.square(b0) - 4.*a0*c0))/(2*a0)
+          #t0n1 = tf.where(tf.is_nan(t0n1),0.5*delta,t0n1)
+          t0n1 = tf.where(tf.is_nan(t0n1),tf.zeros_like(t0n1),t0n1)
+          #t0n1 = tf.where(tf.is_inf(t0n1),0.5*delta,t0n1)
           
           #t0n = 0.1*tf.ones([1],dtype=var.dtype)
           #t0n = tf.zeros([1],dtype=var.dtype)
@@ -280,6 +284,7 @@ class SR1TrustExact:
             phi = psifull - psi
             #phi = tf.where(tf.is_nan(phi),tf.zeros_like(phi),phi)
             w = 1. + phi + psi
+            w = tf.where(tf.is_nan(w),tf.zeros_like(w),w)
             #wfull = 1. + rho*tf.reduce_sum(tf.reshape(xisq,[1,-1])/(tf.reshape(d,[1,-1]) - tf.reshape(d+rho*t,[-1,1])),axis=-1)
             
             #w = tf.Print(w, [w], summarize=5, message = "w")
@@ -308,7 +313,16 @@ class SR1TrustExact:
             b = (Delta*wn1*psin1)/(psiprimen1*c)
             a = (Delta*(1.+phin1)+tf.square(psin1)/psiprimen1)/c + psin1/psiprimen1
             tn1 = tn1 + 2.*b/(a + tf.sqrt(tf.square(a) - 4.*b))
+            #tn1 = tf.where(tf.is_nan(tn1),0.5*delta,tn1)
+            #tn1 = tf.where(tf.is_nan(tn1),tf.zeros_like(tn1),tn1)
+            #tn1 = tf.where(tf.is_inf(tn1),0.5*delta,tn1)
             
+            #tn1 = tf.Print(tn1,[delta],message = "delta",summarize=1000)
+            #tn1 = tf.Print(tn1,[t],message = "t",summarize=1000)
+            #tn1 = tf.Print(tn1,[Delta],message = "Delta",summarize=1000)
+            #tn1 = tf.Print(tn1,[w],message = "w",summarize=1000)
+            #tn1 = tf.Print(tn1,[psi],message = "psi",summarize=1000)
+            #tn1 = tf.Print(tn1,[psiprime],message = "psiprime",summarize=1000)
             #tn1 = tf.Print(tn1,[c],message = "c",summarize=1000)
             #tn1 = tf.Print(tn1,[b],message = "b",summarize=1000)
             #tn1 = tf.Print(tn1,[a],message = "a",summarize=1000)
@@ -320,10 +334,11 @@ class SR1TrustExact:
             tn = tf.reshape(tn,[-1])
             
             t = tf.concat([tn1,tn],axis=0)
+            t = tf.where(tf.is_nan(t),tf.zeros_like(t),t)
             #t = tf.Print(t,[t],message = "t", summarize=1000)
             #t = tf.Print(t,[w],message="w", summarize=1000)
             magw = tf.sqrt(tf.reduce_sum(tf.square(w)))
-            #t = tf.Print(t,[magw],message="magw")
+            t = tf.Print(t,[magw],message="magw")
             
             return (t,w,j+1)
             
@@ -339,11 +354,53 @@ class SR1TrustExact:
           #eoutalt = -tf.reverse(d,axis=(0,)) - rho*t
           eout = tf.where(flipsign,eoutalt,eout)
           
+          talt = tf.reverse(t,axis=(0,))
+          t = tf.where(flipsign,talt,t)
+          
           #now compute eigenvectors
-          Dinv = tf.reciprocal(tf.reshape(ein,[1,-1]) - tf.reshape(eout,[-1,1]))
+          #Dinv = tf.reciprocal(tf.reshape(ein,[1,-1]) - tf.reshape(eout,[-1,1]))
+          #Dinvz = Dinv*tf.reshape(z,[1,-1])
+          #Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1))
+          #uout = tf.matmul(Uin,Dinvz,transpose_b=True)/Dinvzmag
+          
+          #Dinv = tf.reciprocal(tf.reshape(ein,[1,-1]) - tf.reshape(eout,[-1,1]))
+          #Dinvz = Dinv*tf.reshape(z,[1,-1])
+          #Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1))
+          ##Dinvzmag = tf.where(tf.logical_or(tf.is_nan(Dinvzmag),tf.is_inf(Dinvzmag)), tf.ones_like(Dinvzmag), Dinvzmag)
+          ##Dinvz = tf.where(tf.logical_or(tf.is_nan(Dinvz),tf.is_inf(Dinvz)), tf.ones_like(Dinvz), Dinvz)
+          ##Dinvzscaled = Dinvz/Dinvzmag
+          ##Dinvzscaled = tf.where(tf.is_nan(Dinvzscaled),tf.ones_like(Dinvzscaled),Dinvzscaled)
+          ##uout = tf.matmul(Uin,Dinvzscaled,transpose_b=True)
+          #uout = tf.matmul(Uin,Dinvz,transpose_b=True)/Dinvzmag
+          
+          ei = tf.reshape(ein,[-1,1])
+          ej = tf.reshape(ein,[1,-1])
+          D = (ej-ei)/signedrho - tf.reshape(t,[-1,1])
+          
+          ##Dinv = tf.reciprocal(tf.reshape(ein,[1,-1]) - tf.reshape(eout,[-1,1]))
+          ##D = deltam - tf.reshape(t,[-1,1])
+          #D = tf.reshape(ein,[1,-1]) - tf.reshape(eout,[-1,1])
+          Dinv = tf.reciprocal(D)
           Dinvz = Dinv*tf.reshape(z,[1,-1])
           Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1))
+          ##Dinvzmag = tf.where(tf.logical_or(tf.is_nan(Dinvzmag),tf.is_inf(Dinvzmag)), tf.ones_like(Dinvzmag), Dinvzmag)
+          ##Dinvz = tf.where(tf.logical_or(tf.is_nan(Dinvz),tf.is_inf(Dinvz)), tf.ones_like(Dinvz), Dinvz)
+          ##Dinvzscaled = Dinvz/Dinvzmag
+          ##Dinvzscaled = tf.where(tf.is_nan(Dinvzscaled),tf.ones_like(Dinvzscaled),Dinvzscaled)
+          ##uout = tf.matmul(Uin,Dinvzscaled,transpose_b=True)
           uout = tf.matmul(Uin,Dinvz,transpose_b=True)/Dinvzmag
+          uout = tf.where(tf.is_nan(uout),Uin,uout)
+          
+          #umask = tf.reshape(tf.equal(t,0.),[-1,1])
+          
+          #uisnancol = tf.reduce_any(tf.logical_or(tf.is_nan(uout),tf.is_inf(uout)),axis=0,keepdims=True)
+          #ufalse = tf.constant(False,shape=uout.shape)
+          #umask = tf.logical_or(umask,ufalse)
+          #uout = tf.where(umask,Uin,uout)
+          #uisnancol = tf.logical_or(uisnancol,ufalse)
+          #uout = tf.where(uisnancol,Uin,uout)
+          
+          #uout = tf.where(tf.is_nan(uout),Uin,uout)
           
 
           #eout = tf.where(flipsign,-eout,eout)
@@ -371,12 +428,13 @@ class SR1TrustExact:
     #B,H,doscaling = tf.cond(self.doscaling & self.doiter_old, lambda: doSR1Scaling(B,H,dgrad,dx), lambda: (B,H,self.doscaling))
     B,esec,Usec = tf.cond(self.doiter_old, lambda: doSR1Update(B,esec,Usec,dgrad,dx), lambda: (B,esec,Usec))  
     
+    nprint = 5
     etrue,Utrue = tf.self_adjoint_eig(B)
-    esec = tf.Print(esec,[esec],message = "esec",summarize=10000)
-    esec = tf.Print(esec,[etrue],message = "etrue",summarize=10000)
+    esec = tf.Print(esec,[esec],message = "esec",summarize=nprint)
+    esec = tf.Print(esec,[etrue],message = "etrue",summarize=nprint)
     
-    esec = tf.Print(esec,[Usec[:,0]],message = "Usec",summarize=10000)
-    esec = tf.Print(esec,[Utrue[:,0]],message = "Utrue",summarize=10000)
+    #esec = tf.Print(esec,[Usec[:,0]],message = "Usec",summarize=10000)
+    #esec = tf.Print(esec,[Utrue[:,0]],message = "Utrue",summarize=10000)
     
     #psi = tf.Print(psi,[psi],message="psi: ")
     #M = tf.Print(M,[M],message="M: ")
@@ -409,6 +467,9 @@ class SR1TrustExact:
       
       a = tf.matmul(U, gradcol,transpose_a=True)
       a = tf.reshape(a,[-1])
+      #a = tf.Print(a,[U],message="U",summarize=10000)
+      #a = tf.Print(a,[gradcol],message="gradcol",summarize=10000)
+      #a = tf.Print(a,[a],message="a",summarize=10000)
       
       amagsq = tf.reduce_sum(tf.square(a))
       gmagsq = tf.reduce_sum(tf.square(grad))
@@ -472,6 +533,7 @@ class SR1TrustExact:
       phisigma0 = phif(sigma0)
       #usesolu = e0>0. & phisigma0 >= 0.
       usesolu = tf.logical_and(e0>0. , phisigma0 >= 0.)
+      usesolu = tf.Print(usesolu,[usesolu], message="usesolu")
       #usesolu = tf.Print(usesolu,[sigma0,phisigma0,usesolu], message = "sigma0, phisigma0,usesolu: ")
 
       #def solu():
@@ -536,6 +598,7 @@ class SR1TrustExact:
       
       return [var+p, predicted_reduction_out, tf.logical_not(usesolu), grad]
 
+    doiter = tf.Print(doiter,[doiter],message="doiter")
     loopout = tf.cond(doiter, lambda: build_sol(), lambda: [self.var_old+0., tf.zeros_like(loss),tf.constant(False),self.grad_old])
     var_out, predicted_reduction_out, atboundary_out, grad_out = loopout
     
