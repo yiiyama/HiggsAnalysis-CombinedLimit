@@ -603,68 +603,96 @@ for itoy in range(ntoys):
     ifit = 0
     sess.run(opinit)
     
-    #e,u = tf.self_adjoint_eig(tfminimizer.B)
-    #ea = tf.self_adjoint_eigvals(tfminimizer.B)
     
-    #chol = tf.cholesky(tfminimizer.B - 4.*e[0]*tf.eye(int(x.shape[0]),dtype=dtype))
-    #matmul = tf.matmul(tfminimizer.H,tf.reshape(tfminimizer.grad_old,[-1,1]))
-    #matsolve = tf.matrix_solve(tfminimizer.B,tf.reshape(tfminimizer.grad_old,[-1,1]))
-    #onev = tf.ones(x.shape,dtype=x.dtype)/math.sqrt(int(x.shape[0]))
-    #hessv = tf.gradients(grad*tf.stop_gradient(onev),x,gate_gradients=True)
     
-    #t0 = time.time()
-    #neval = 10
-    #for i in range(neval):
-      ##print(i)
-      #sess.run([e,u])
-    #t = time.time()-t0
-    #t /= neval
-    #print("eig time = %f" % t)
+    #B = tf.constant(sess.run(invhessian))
     
-    #t0 = time.time()
-    #neval = 10
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(ea)
-    #t = time.time()-t0
-    #t /= neval
-    #print("eigval time = %f" % t)
+    B = tf.random_normal(hessian.shape,dtype=dtype)
+    BL = tf.matrix_band_part(B,-1,0) 
+    B = BL + tf.transpose(BL)
+    B = tf.constant(sess.run(B))
     
-    #t0 = time.time()
-    #neval = 10
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(chol)
-    #t = time.time()-t0
-    #t /= neval
-    #print("chol time = %f" % t)
+    e,u = tf.self_adjoint_eig(B)
+    ea = tf.self_adjoint_eigvals(B)    
     
-    #t0 = time.time()
-    #neval = 1000
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(matmul)
-    #t = time.time()-t0
-    #t /= neval
-    #print("matmul time = %f" % t)
+    Bmod = tf.constant(sess.run(B - 4.*e[0]*tf.eye(int(x.shape[0]),dtype=dtype)))
+    chol = tf.cholesky(Bmod)
+    matmulv = tf.matmul(B,tf.reshape(tfminimizer.grad_old,[-1,1]))
+    matmul = tf.matmul(B,B)
+    matsolve = tf.matrix_solve(B,tf.reshape(tfminimizer.grad_old,[-1,1]))
+    onev = tf.ones(x.shape,dtype=x.dtype)/math.sqrt(int(x.shape[0]))
+    hessv = tf.gradients(grad*tf.stop_gradient(onev),x,gate_gradients=True)
+    
+    sess.run([e,u])
+    t0 = time.time()
+    neval = 10
+    for i in range(neval):
+      print(i)
+      sess.run([e,u])
+    t = time.time()-t0
+    t /= neval
+    print("eig time = %f" % t)
+    
+    print(B.shape)
+    print(sess.run(e))
+    print(sess.run(ea))
+    
+    t0 = time.time()
+    neval = 2000
+    for i in range(neval):
+      #print(i)
+      sess.run(ea)
+    t = time.time()-t0
+    t /= neval
+    print("eigval time = %f" % t)
+    
+    t0 = time.time()
+    neval = 100
+    for i in range(neval):
+      #print(i)
+      sess.run(chol)
+    t = time.time()-t0
+    t /= neval
+    print("chol time = %f" % t)
 
-    #t0 = time.time()
-    #neval = 1000
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(matsolve)
-    #t = time.time()-t0
-    #t /= neval
-    #print("matsolve time = %f" % t)
+    t0 = time.time()
+    neval = 200
+    for i in range(neval):
+      print(i)
+      sess.run(matmulv)
+    t = time.time()-t0
+    t /= neval
+    print("matmulv time = %f" % t)
+
     
-    #t0 = time.time()
-    #neval = 100
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(hessv)
-    #t = time.time()-t0
-    #t /= neval
-    #print("hessv time = %f" % t)
+    t0 = time.time()
+    neval = 50
+    for i in range(neval):
+      print(i)
+      sess.run(matmul)
+    t = time.time()-t0
+    t /= neval
+    print("matmul time = %f" % t)
+
+    t0 = time.time()
+    neval = 1000
+    for i in range(neval):
+      #print(i)
+      sess.run(matsolve)
+    t = time.time()-t0
+    t /= neval
+    print("matsolve time = %f" % t)
+    
+    t0 = time.time()
+    neval = 100
+    for i in range(neval):
+      #print(i)
+      sess.run(hessv)
+    t = time.time()-t0
+    t /= neval
+    print("hessv time = %f" % t)
+ 
+    exit()
  
     while True:
       isconverged,_ = sess.run(opmin)

@@ -218,6 +218,8 @@ class SR1TrustExact:
         Dinv = tf.reciprocal(D)
         Dinvz = Dinv*tf.reshape(z,[1,-1])
         Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1))
+        
+        #n.b. this is the most expensive operation (matrix-matrix multiplication to compute the updated eigenvectors)
         uout = tf.matmul(Uin,Dinvz,transpose_b=True)/Dinvzmag
         uout = tf.where(tf.is_nan(uout),Uin,uout)
         
