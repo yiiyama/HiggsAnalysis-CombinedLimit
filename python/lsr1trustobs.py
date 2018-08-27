@@ -103,10 +103,7 @@ class SR1TrustExact:
         signedrho = dyBxaltnormsq/denalt
         signedrho = tf.reshape(signedrho,[])
         rho = tf.abs(signedrho)
-      
-        C = tf.diag(ein) + rho*tf.matmul(z,z,transpose_b=True)
-        normC = tf.sqrt(tf.reduce_sum(tf.square(C)))
-      
+            
         xisq = tf.square(z)
         
         
@@ -120,7 +117,6 @@ class SR1TrustExact:
         
         w0 = tf.ones_like(var)
         thres0 = tf.zeros_like(var)
-        etaw = 1e-14
         
         en1 = d[:-1]
         e1 = d[1:]
@@ -149,9 +145,11 @@ class SR1TrustExact:
         t0n = tf.reshape(xisq[-1],[-1])
         t0 = tf.concat([t0n1,t0n],axis=0)          
                   
-        loop_vars = [t0,tf.constant(True),tf.constant(0)]
+        unconverged0 = tf.constant(True,shape=[var.shape[0]])
+                  
+        loop_vars = [t0,unconverged0,tf.constant(0)]
         def cond(t,unconverged,j):
-          return (unconverged) & (j<50)        
+          return tf.reduce_any(unconverged) & (j<50)
         
         def body(t,unconverged,j):
           psim = tf.reshape(xisq,[1,-1])/(deltam - tf.reshape(t,[-1,1]))
@@ -186,20 +184,16 @@ class SR1TrustExact:
           tn = t[-1] + (1.+psin)*psin/psiprimen
           tn = tf.reshape(tn,[-1])
           
-          #told = t
+          told = t
           t = tf.concat([tn1,tn],axis=0)
           t = tf.where(tf.is_nan(t),tf.zeros_like(t),t)
           
-          #tred = 
-          
-          thres = normC*tf.sqrt(phiprime + psiprime)/rho
-          thres = tf.where(tf.is_nan(thres),tf.ones_like(thres),thres)
-          unconverged = tf.reduce_any(tf.abs(w) > etaw*thres)
-                      
+          tadvancing = t > told
+          unconverged = unconverged & tadvancing
+                                  
           magw = tf.sqrt(tf.reduce_sum(tf.square(w)))
 
-          maxconv = tf.reduce_max(tf.abs(w)/thres)
-          t = tf.Print(t,[maxconv],message="maxconv")
+          t = tf.Print(t,[magw],message="magw")
           
           return (t,unconverged,j+1)
           
