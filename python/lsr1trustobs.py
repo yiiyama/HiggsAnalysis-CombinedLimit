@@ -188,6 +188,10 @@ class SR1TrustExact:
           t = tf.concat([tn1,tn],axis=0)
           t = tf.where(tf.is_nan(t),tf.zeros_like(t),t)
           
+          #when individual eigenvalues have converged we mark them as such
+          #but simply keep iterating on the full vector, since any efficiency
+          #gains from partially stopping and chopping up the vector would likely incur
+          #more overhead, especially on GPU
           tadvancing = t > told
           unconverged = unconverged & tadvancing
                                   
@@ -292,29 +296,26 @@ class SR1TrustExact:
       usesolu = tf.logical_and(e0>0. , phisigma0 >= 0.)
       
       def sigma():
-        tol = 1e-10
+        #tol = 1e-10
         maxiter = 50
 
         sigmainit = tf.reduce_max(tf.abs(a)/trustradius_out - lam)
         sigmainit = tf.maximum(sigmainit,tf.zeros_like(sigmainit))
-        phiinit = phif(sigmainit)
+        phiinit,phiprimeinit = phiphiprime(sigmainit)
                 
-        loop_vars = [sigmainit, phiinit, tf.zeros([],dtype=tf.int32)]
+        loop_vars = [sigmainit, phiinit,phiprimeinit, tf.constant(True), tf.zeros([],dtype=tf.int32)]
         
-        def cond(sigma,phi,j):
-          #phi = tf.Print(phi,[phi],message = "checking phi in cond()")
-          return tf.logical_and(phi < -tol, j<maxiter)
-          #return tf.logical_and(tf.abs(phi) > tol, j<maxiter)
+        def cond(sigma,phi,phiprime,unconverged,j):
+          return (unconverged) & (j<maxiter)
         
-        def body(sigma,phi,j):   
-          #sigma = tf.Print(sigma, [sigma, phi], message = "sigmain, phiin: ")
-          phiout, phiprimeout = phiphiprime(sigma)
-          sigmaout = sigma - phiout/phiprimeout
-          #sigmaout = tf.Print(sigmaout, [sigmaout,phiout, phiprimeout], message = "sigmaout, phiout, phiprimeout: ")
+        def body(sigma,phi,phiprime,unconverged,j):   
+          sigmaout = sigma - phi/phiprime
+          phiout, phiprimeout = phiphiprime(sigmaout)
+          unconverged = (phiout > phi) & (phiout < 0.)
           phiout = tf.Print(phiout,[phiout],message="phiout")
-          return (sigmaout,phiout,j+1)
+          return (sigmaout,phiout,phiprimeout,unconverged,j+1)
           
-        sigmaiter, phiiter, jiter = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)        
+        sigmaiter, phiiter,phiprimeiter,unconverged,jiter = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)        
         return sigmaiter
       
       #sigma=0 corresponds to the unconstrained solution on the interior of the trust region
