@@ -323,7 +323,7 @@ minimizer = ScipyTROptimizerInterface(l, var_list = [x], var_to_bounds={x: (lb,u
 #tfminimizer = SR1TrustOBS(l,x,grad)
 tfminimizer = SR1TrustExact(l,x,grad)
 #opinit = tfminimizer.initialize(l,x,grad)
-opinit = tfminimizer.initialize(l,x,grad,hessian,invhessian)
+opinit = tfminimizer.initialize(l,x,grad,hessian)
 opmin = tfminimizer.minimize(l,x,grad)
 
 scanvars = {}
