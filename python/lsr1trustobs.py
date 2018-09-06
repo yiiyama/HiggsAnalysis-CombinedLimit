@@ -85,42 +85,105 @@ class SR1TrustExact:
       
       UTdx = tf.matmul(Uin, dx,transpose_a=True)
       UTy = tf.matmul(Uin,y,transpose_a=True)
-      denalt = tf.matmul(y,dx,transpose_a=True) - tf.matmul(UTdx,ecol*UTdx,transpose_a=True)
-      den = denalt
-      dyBxalt =  UTy - ecol*UTdx
-      dyBxaltnormsq = tf.reduce_sum(tf.square(dyBxalt))
-      dyBxaltnorm = tf.sqrt(dyBxaltnormsq)
+      den = tf.matmul(y,dx,transpose_a=True) - tf.matmul(UTdx,ecol*UTdx,transpose_a=True)
+      dyBx =  UTy - ecol*UTdx
+      dyBxnormsq = tf.reduce_sum(tf.square(dyBx))
+      dyBxnorm = tf.sqrt(dyBxnormsq)
       dxnorm = tf.sqrt(tf.reduce_sum(tf.square(dx)))
-      dennorm = dxnorm*dyBxaltnorm
-      dentest = tf.less(tf.abs(denalt),1e-8*dennorm)
+      dennorm = dxnorm*dyBxnorm
+      dentest = tf.less(tf.abs(den),1e-8*dennorm)
       dentest = tf.reshape(dentest,[])
       dentest = tf.logical_or(dentest,tf.equal(actual_reduction,0.))
       
       
-      def doUpdate():              
-        z = dyBxalt/dyBxaltnorm
-
-        signedrho = dyBxaltnormsq/denalt
+      def doUpdate():
+        UTin = tf.transpose(Uin)
+        z = dyBx/dyBxnorm
+        signedrho = dyBxnormsq/den
         signedrho = tf.reshape(signedrho,[])
+        signedrho = tf.Print(signedrho,[signedrho],message="signedrho")
         rho = tf.abs(signedrho)
-            
+
+        enorm = ein/signedrho
+
+        flipsign = signedrho < 0.
+        
+        #in case rho<0, reverse order of eigenvalues and eigenvectors and flip signs
+        #to ensure consistent ordering
+        #z needs to be reversed as well since it was already computed with the original ordering
+        einalt = -tf.reverse(ein,axis=(0,))
+        enormalt = tf.reverse(enorm,axis=(0,))
+        UTinalt = tf.reverse(UTin,axis=(0,))
+        zalt = tf.reverse(z,axis=(0,))
+        
+        estart = tf.where(flipsign,einalt,ein)
+        enormstart = tf.where(flipsign,enormalt,enorm)
+        UTstart = tf.where(flipsign,UTinalt,UTin)
+        z = tf.where(flipsign,zalt,z)
+        
+        #deflation in case of repeated eigenvalues
+        unique, uniqueidxs, uniquecounts = tf.unique_with_counts(estart)
+        #these are the indices of the eigenvalue-eigenvector pairs which are expected to change
+        firstidxs = tf.cumsum(uniquecounts, exclusive=True)
+        
+        lastidxs = firstidxs + uniquecounts - 1
+        lastidxscol = tf.reshape(lastidxs,[-1,1])
+        
+        islast = tf.scatter_nd(lastidxscol,tf.ones_like(unique,dtype=tf.bool),estart.shape)
+        nonlastidxscol = tf.where(tf.logical_not(islast))
+        nonlastidxs = tf.reshape(nonlastidxscol,[-1])
+        
+        zflat = tf.reshape(z,[-1])
         xisq = tf.square(z)
+        xisq2 = tf.segment_sum(xisq,uniqueidxs)
+        absz2 = tf.sqrt(xisq2)
+        z2 = -absz2
         
+        #TODO Consider also moving the splitting of repeating vs nonrepeating
+        #eigenvalues outside of the deflation
         
-        flipsign = tf.reshape(den,[])<0.
-        d = ein
-        dalt = -tf.reverse(d, axis=(0,))
-        d = tf.where(flipsign, dalt, d)
+        arr0 = tf.TensorArray(var.dtype,size=tf.shape(unique)[0],infer_shape=False,element_shape=[None,var.shape[0]])
+        deflate_var_list = [arr0, tf.constant(0,dtype=tf.int32)]
+        def deflate_cond(arr,j):
+          return j<arr.size()
+        def deflate_body(arr,j):
+          size = uniquecounts[j]
+          startidx = firstidxs[j]
+          endidx = startidx + size
+          zsub = zflat[startidx:endidx]
+          UTsub = UTstart[startidx:endidx]
+          magzsub = absz2[j]
+          en = tf.one_hot(size-1,depth=size,dtype=zsub.dtype)
+          #this is the vector which implicitly defines the Householder transformation matrix
+          v = zsub/magzsub + en
+          v = v/tf.sqrt(tf.reduce_sum(tf.square(v)))
+          v = tf.reshape(v,[-1,1])
+          #protection for v~=0 case (when zsub~=-en), then no transformation is needed
+          nullv = tf.reduce_all(tf.equal(tf.sign(zsub),-en))
+          v = tf.where(nullv,tf.zeros_like(v),v)
+          UTbarsub = UTsub - 2.*tf.matmul(v,tf.matmul(v,UTsub,transpose_a=True))
+          arr = arr.write(j,UTbarsub)
+          return (arr, j+1)
         
-        xisqalt = tf.reverse(xisq,axis=(0,))
-        xisq = tf.where(flipsign,xisqalt,xisq)
+        UTbararr,j = tf.while_loop(deflate_cond,deflate_body,deflate_var_list, parallel_iterations=64, back_prop=False)
+        UTbar = UTbararr.concat()
         
-        w0 = tf.ones_like(var)
-        thres0 = tf.zeros_like(var)
+        #TODO, properly include xi^2 != 0 condition for building of deflated problem
+        
+        UT1 = tf.gather(UTbar,nonlastidxs)     
+        UT2 = tf.gather(UTbar,lastidxs)
+            
+        
+        unique = tf.Print(unique,[unique],message="unique")
+        
+        d = unique
+        
+        xisq = xisq2
         
         en1 = d[:-1]
         e1 = d[1:]
         delta = (e1 - en1)/rho
+        #delta = tf.Print(delta,[delta],message="delta",summarize=100000)
         xisqn1 = tf.reshape(xisq[:-1],[-1])
         xisq1 = tf.reshape(xisq[1:],[-1])
         
@@ -128,24 +191,49 @@ class SR1TrustExact:
         dj = tf.reshape(d,[1,-1])
         deltam = (dj-di)/rho
         deltamn1 = deltam[:-1]
-        
-        
+
         s0mden = deltamn1 - tf.reshape(delta,[-1,1])
         s0m = tf.reshape(xisq,[1,-1])/s0mden
-        s0m = tf.where(tf.equal(s0mden,0.),tf.zeros_like(s0m),s0m)
-        s0m = s0m - tf.matrix_band_part(s0m,1,0)
+        #s0m = tf.where(tf.equal(s0mden,0.),tf.zeros_like(s0m),s0m)
+        s0m = tf.Print(s0m,[tf.shape(s0m)],message="s0mshape")
+        #protection for case where there is only one unique eigenvalue such that 
+        #this matrix is empty
+        #nlower = tf.minimum(1,tf.shape(s0m)[0])
+        #nlower = 1
+        nupper = tf.minimum(1,tf.shape(s0m)[0])
+        #s0mask = tf.matrix_band_part(tf.ones_like(s0m,dtype=tf.bool),nlower,0)
+        s0mask = tf.matrix_band_part(tf.ones_like(s0m,dtype=tf.bool),tf.zeros_like(nupper),nupper)
+        s0m = tf.where(s0mask,tf.zeros_like(s0m),s0m)
+        #s0m = s0m - tf.matrix_band_part(s0m,nlower,0)
+        #s0m = tf.Print(s0m,[s0mask],message="s0mask",summarize=10000)
+        #s0m = tf.Print(s0m,[s0m],message="s0m",summarize=10000)
         s0 = tf.reduce_sum(s0m,axis=-1)
         
         a0 = 1.+s0
         b0 = -(xisqn1 + xisq1 + (1.+s0)*delta)
         c0 = xisqn1*delta
         t0n1 = (-b0 - tf.sqrt(tf.square(b0) - 4.*a0*c0))/(2*a0)
-        t0n1 = tf.where(tf.is_nan(t0n1),tf.zeros_like(t0n1),t0n1)
+        #t0n1 = tf.where(tf.is_nan(t0n1),tf.zeros_like(t0n1),t0n1)
         
         t0n = tf.reshape(xisq[-1],[-1])
         t0 = tf.concat([t0n1,t0n],axis=0)          
+        
+        dmt0n1 = delta - t0n1
+        
+        #t0 = tf.Print(t0,[dmt0n1],message="dmt0n1",summarize=10000)
+
+        
+        #t0 = tf.Print(t0,[s0],message="s0",summarize=10000)
+        #t0 = tf.Print(t0,[a0],message="a0",summarize=10000)
+        #t0 = tf.Print(t0,[b0],message="b0",summarize=10000)
+        #t0 = tf.Print(t0,[c0],message="c0",summarize=10000)
+        #t0 = tf.Print(t0,[t0],message="t0",summarize=10000)
                   
-        unconverged0 = tf.constant(True,shape=[var.shape[0]])
+        #TODO, consider moving to more robust algorithm to find roots s.t. starting position of 0 and/or delta is valid
+        #Alternatively fix the choice of starting point to avoid this problem (which occurs when xi^2_i and/or xi^2_{i+1}
+        #are much smaller than delta)
+                  
+        unconverged0 = tf.ones_like(t0,dtype=tf.bool)
                   
         loop_vars = [t0,unconverged0,tf.constant(0)]
         def cond(t,unconverged,j):
@@ -153,13 +241,39 @@ class SR1TrustExact:
         
         def body(t,unconverged,j):
           psim = tf.reshape(xisq,[1,-1])/(deltam - tf.reshape(t,[-1,1]))
+          #psimtrue = tf.ones_like(psim,dtype=tf.bool)
+          #psimmask = tf.matrix_set_diag(tf.matrix_band_part(psimtrue,0,1), tf.zeros_like(t,dtype=tf.bool))
+          #psim = tf.where(psimmask,tf.zeros_like(psim),psim)
+          absden = tf.abs(deltam - tf.reshape(t,[-1,1]))
+          minabsden = tf.reduce_min(absden)
+          minabsdenidxs = tf.where(tf.equal(absden,minabsden))
+          psim = tf.Print(psim,[minabsden],message="minabsden")
+          psim = tf.Print(psim,[minabsdenidxs],message="minabsdenidxs",summarize=1000)
+          #nullidxs = tf.where(tf.equal(absden,0.))
+          #psim = tf.Print(psim,[nullidxs],message="nullidxs")
+          nullidx = minabsdenidxs[0][0]
+          dmtn1 = delta - t[:-1]
+          psim = tf.Print(psim,[delta[nullidx]],message="deltanull")
+          psim = tf.Print(psim,[xisqn1[nullidx]],message="xisqn1null")
+          psim = tf.Print(psim,[xisq1[nullidx]],message="xisq1null")
+          psim = tf.Print(psim,[s0[nullidx]],message="s0null")
+          psim = tf.Print(psim,[a0[nullidx]],message="a0null")
+          psim = tf.Print(psim,[b0[nullidx]],message="b0null")
+          psim = tf.Print(psim,[c0[nullidx]],message="c0null")
+          psim = tf.Print(psim,[t0[nullidx]],message="t0null")
+          psim = tf.Print(psim,[dmt0n1[nullidx]],message="dmt0n1null")
+          psim = tf.Print(psim,[t[nullidx]],message="tnull")
+          psim = tf.Print(psim,[dmtn1[nullidx]],message="dmtn1null")
+          
+          
           psi = tf.diag_part(tf.cumsum(psim,axis=-1))
           psifull = tf.reduce_sum(psim,axis=-1)
           phi = psifull - psi
           w = 1. + phi + psi
-          w = tf.where(tf.is_nan(w),tf.zeros_like(w),w)
+          #w = tf.where(tf.is_nan(w),tf.zeros_like(w),w)
           
           psiprimem = tf.reshape(xisq,[1,-1])/tf.square(deltam - tf.reshape(t,[-1,1]))
+          #psiprimem = tf.where(psimmask,tf.zeros_like(psiprimem),psiprimem)
           psiprime = tf.diag_part(tf.cumsum(psiprimem, axis=-1))
           psiprimefull = tf.reduce_sum(psiprimem,axis=-1)
           phiprime = psiprimefull - psiprime
@@ -186,7 +300,8 @@ class SR1TrustExact:
           
           told = t
           t = tf.concat([tn1,tn],axis=0)
-          t = tf.where(tf.is_nan(t),tf.zeros_like(t),t)
+          #t = tf.where(tf.is_nan(t),t0,t)
+          #t = tf.where(tf.is_nan(t),tf.zeros_like(t),t)
           
           #when individual eigenvalues have converged we mark them as such
           #but simply keep iterating on the full vector, since any efficiency
@@ -197,32 +312,78 @@ class SR1TrustExact:
                                   
           magw = tf.sqrt(tf.reduce_sum(tf.square(w)))
 
+          #t = tf.Print(t,[psi],message="psi",summarize=10000)
+          #t = tf.Print(t,[phi],message="phi",summarize=10000)
+          #t = tf.Print(t,[psiprime],message="psiprime",summarize=10000)
+          #t = tf.Print(t,[phiprime],message="phiprime",summarize=10000)
+          #t = tf.Print(t,[a],message="a",summarize=10000)
+          #t = tf.Print(t,[b],message="b",summarize=10000)
+          #t = tf.Print(t,[c],message="c",summarize=10000)
+          #t = tf.Print(t,[t],message="t",summarize=10000)
+          #t = tf.Print(t,[w],message="w",summarize=1000)
           t = tf.Print(t,[magw],message="magw")
           
           return (t,unconverged,j+1)
           
           
         t,unconverged,j = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
-        eout = d + rho*t
-        eoutalt = -tf.reverse(eout,axis=(0,))
-        eout = tf.where(flipsign,eoutalt,eout)
         
-        talt = tf.reverse(t,axis=(0,))
-        t = tf.where(flipsign,talt,t)
+        deltae2 = rho*t
         
         #now compute eigenvectors          
-        ei = tf.reshape(ein,[-1,1])
-        ej = tf.reshape(ein,[1,-1])
-        D = (ej-ei)/signedrho - tf.reshape(t,[-1,1])
+        ei = tf.reshape(unique,[-1,1])
+        ej = tf.reshape(unique,[1,-1])
+        D = (ej-ei)/rho - tf.reshape(t,[-1,1])
         
         Dinv = tf.reciprocal(D)
-        Dinvz = Dinv*tf.reshape(z,[1,-1])
-        Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1))
+        Dinvz = Dinv*tf.reshape(z2,[1,-1])
+        #Dinz = tf.where(tf.equal(D,0.),tf.ones_like(Dinvz),Dinvz)
+        #Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1))
+        Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1,keepdims=True))
+        Dinvz = Dinvz/Dinvzmag
+        ##Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=0))
         
         #n.b. this is the most expensive operation (matrix-matrix multiplication to compute the updated eigenvectors)
-        uout = tf.matmul(Uin,Dinvz,transpose_b=True)/Dinvzmag
-        uout = tf.where(tf.is_nan(uout),Uin,uout)
+        UT2out = tf.matmul(Dinvz,UT2)
         
+        #UT2out = tf.Print(UT2out,[tf.shape(UT2out)],message="UT2out shape")
+        
+        #now put everything back together
+        #eigenvalues are still guaranteed to be sorted
+        eout = estart + tf.scatter_nd(lastidxscol,deltae2,estart.shape)
+        UTout = tf.scatter_nd(lastidxscol,UT2out,UTstart.shape) + tf.scatter_nd(nonlastidxscol,UT1,UTstart.shape)
+        
+        #restore correct order and signs if necessary
+        eoutalt = -tf.reverse(eout,axis=(0,))
+        UToutalt = tf.reverse(UTout,axis=(0,))
+        
+        eout = tf.where(flipsign,eoutalt,eout)
+        UTout = tf.where(flipsign,UToutalt,UTout)
+        
+        uout = tf.transpose(UTout)
+        
+        
+        #ufalse = tf.constant(False,shape=uout.shape)
+        #umask = tf.logical_or(tf.equal(tf.reshape(t,[1,-1]),0.),umask)
+        #umask = tf.equal(estart[1:],estart[:-1])
+        #umask = tf.concat([umask,False])
+        #umask = tf.reshape(umask,[1,-1])
+        #umask = tf.logical_or(umask,ufalse)
+        #umask = tf.equal(tf.reshape(eout,[-1,1]),tf.reshape(estart,[1,-1]))
+        #uout = tf.where(umask,Uin,uout)
+        
+        #uout = uout/tf.sqrt(tf.reduce_sum(tf.square(uout),axis=0,keepdims=True))
+        #uout = tf.matmul(Uin,Dinvz,transpose_b=True)/Dinvzmag
+        #uout = tf.matmul(Uin,Dinvz,transpose_b=True)/tf.transpose(Dinvzmag)
+        #uout = tf.where(tf.is_nan(uout),Uin,uout)
+        #umag = tf.sqrt(tf.reduce_sum(tf.square(uout),axis=0))
+        
+        #eout = tf.Print(eout,[eout],message="eout",summarize=1000)
+        #uout = tf.Print(uout,[uout],message="uout",summarize=1000)
+        #uout = tf.Print(uout,[umag],message="umag",summarize=1000)
+        
+        eout = tf.Print(eout,[ein],message="ein",summarize=10000)
+        eout = tf.Print(eout,[eout],message="eout",summarize=10000)
         
         return (eout,uout)
       
@@ -274,7 +435,12 @@ class SR1TrustExact:
       abarsq = tf.unsorted_segment_sum(abarsq,abarindicesu,tf.shape(lambar)[0])
       
       abar = tf.sqrt(abarsq)
-            
+       
+      #abarsq = tf.Print(abarsq,[asq],message="asq",summarize=1000) 
+      #abarsq = tf.Print(abarsq,[lam],message="lam",summarize=1000) 
+      #abarsq = tf.Print(abarsq,[abarsq],message="abarsq",summarize=1000)
+      #abarsq = tf.Print(abarsq,[lambar],message="lambar",summarize=1000)
+       
       e0 = lam[0]
       sigma0 = tf.maximum(-e0,tf.zeros([],dtype=var.dtype))
       
@@ -326,7 +492,15 @@ class SR1TrustExact:
       #solution can be computed directly from eigenvalues and eigenvectors
       coeffs = -a/(lam+sigma)
       coeffs = tf.reshape(coeffs,[1,-1])
-      p = tf.reduce_sum(coeffs*U, axis=-1)
+      #p = tf.reduce_sum(coeffs*U, axis=-1)
+      p = tf.matmul(U,tf.reshape(coeffs,[-1,1]))
+      p = tf.reshape(p,[-1])
+
+      Umag = tf.sqrt(tf.reduce_sum(tf.square(U),axis=0))
+      coeffsmag = tf.sqrt(tf.reduce_sum(tf.square(coeffs)))
+      pmag = tf.sqrt(tf.reduce_sum(tf.square(p)))
+      p = tf.Print(p,[Umag],message="Umag")
+      p = tf.Print(p,[pmag,coeffsmag,sigma],message="pmag,coeffsmag,sigma")
 
       #predicted reduction also computed directly from eigenvalues and eigenvectors
       predicted_reduction_out = -(tf.reduce_sum(a*coeffs) + 0.5*tf.reduce_sum(lam*tf.square(coeffs)))
