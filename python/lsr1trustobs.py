@@ -14,7 +14,7 @@ class SR1TrustExact:
     self.doiter_old = tf.Variable(False, trainable = False)
     self.grad_old = tf.Variable(tf.zeros_like(var), trainable=False)
     self.isfirstiter = tf.Variable(True, trainable=False)
-    self.U = tf.Variable(tf.eye(int(var.shape[0]),dtype=var.dtype),trainable=False)
+    self.UT = tf.Variable(tf.eye(int(var.shape[0]),dtype=var.dtype),trainable=False)
     self.e = tf.Variable(tf.ones_like(var),trainable=False)
     self.doscaling = tf.Variable(False)
     
@@ -25,8 +25,9 @@ class SR1TrustExact:
     
     if B is not None:
       e,U = tf.self_adjoint_eig(B)
+      UT = tf.transpose(U)
       alist.append(tf.assign(self.e,e))
-      alist.append(tf.assign(self.U,U))
+      alist.append(tf.assign(self.UT,UT))
     return tf.group(alist)
   
   def minimize(self, loss, var, grad = None):
@@ -78,13 +79,13 @@ class SR1TrustExact:
     #since we are directly updating the eigenvalue-eigenvector decomposition.
     #The actual hessian approximation is never stored (but memory requirements
     #are similar since the full set of eigenvectors is stored)
-    def doSR1Update(ein,Uin,yin,dxin):
+    def doSR1Update(ein,UTin,yin,dxin):
       y = tf.reshape(yin,[-1,1])
       dx = tf.reshape(dxin,[-1,1])
       ecol = tf.reshape(ein,[-1,1])
       
-      UTdx = tf.matmul(Uin, dx,transpose_a=True)
-      UTy = tf.matmul(Uin,y,transpose_a=True)
+      UTdx = tf.matmul(UTin, dx)
+      UTy = tf.matmul(UTin,y)
       den = tf.matmul(y,dx,transpose_a=True) - tf.matmul(UTdx,ecol*UTdx,transpose_a=True)
       dyBx =  UTy - ecol*UTdx
       dyBxnormsq = tf.reduce_sum(tf.square(dyBx))
@@ -97,7 +98,7 @@ class SR1TrustExact:
       
       
       def doUpdate():
-        UTin = tf.transpose(Uin)
+        #UTin = tf.transpose(Uin)
         z = dyBx/dyBxnorm
         signedrho = dyBxnormsq/den
         signedrho = tf.reshape(signedrho,[])
@@ -145,6 +146,7 @@ class SR1TrustExact:
         #TODO Consider also moving the splitting of repeating vs nonrepeating
         #eigenvalues outside of the deflation
         
+        #arr0 = tf.TensorArray(var.dtype,size=tf.shape(unique)[0],infer_shape=False,element_shape=[None,var.shape[0]])
         arr0 = tf.TensorArray(var.dtype,size=tf.shape(unique)[0],infer_shape=False,element_shape=[None,var.shape[0]])
         deflate_var_list = [arr0, tf.constant(0,dtype=tf.int32)]
         def deflate_cond(arr,j):
@@ -402,14 +404,12 @@ class SR1TrustExact:
         Dinvzmagi = tf.reshape(Dinvzmag,[-1,1])
         Dinvzmaginull = tf.equal(Dinvzmagi,0.)
         Dinvzmagiinf = tf.is_inf(Dinvzmagi)
-        Dmfalse = tf.zeros_like(Dinvz,dtype=tf.bool)
-        Dinvznullm = tf.logical_or(Dmfalse,Dinvzmaginull)
-        Dinvzinfm = tf.logical_or(Dmfalse,Dinvzmagiinf)
+        UT2false = tf.zeros_like(UT2,dtype=tf.bool)
+        Dinvznullm = tf.logical_or(UT2false,Dinvzmaginull)
+        Dinvzinfm = tf.logical_or(UT2false,Dinvzmagiinf)
         UT2out = tf.where(Dinvznullm,UT2,UT2out)
         UT2out = tf.where(Dinvzinfm,UT21,UT2out)
-        
-        #UT2out = tf.Print(UT2out,[tf.shape(UT2out)],message="UT2out shape")
-        
+                
         #now put everything back together
         #eigenvalues are still guaranteed to be sorted
         eout = estart + tf.scatter_nd(lastidxscol,deltae2,estart.shape)
@@ -422,7 +422,7 @@ class SR1TrustExact:
         eout = tf.where(flipsign,eoutalt,eout)
         UTout = tf.where(flipsign,UToutalt,UTout)
         
-        uout = tf.transpose(UTout)
+        #uout = tf.transpose(UTout)
         
         
         #ufalse = tf.constant(False,shape=uout.shape)
@@ -447,18 +447,18 @@ class SR1TrustExact:
         #eout = tf.Print(eout,[ein],message="ein",summarize=10000)
         #eout = tf.Print(eout,[eout],message="eout",summarize=10000)
         
-        return (eout,uout)
+        return (eout,UTout)
       
-      e,U = tf.cond(dentest, lambda: (ein,Uin), doUpdate)
+      e,UT = tf.cond(dentest, lambda: (ein,UTin), doUpdate)
       
-      return (e,U)
+      return (e,UT)
     
     esec = self.e
-    Usec = self.U
+    UTsec = self.UT
     
     doscaling = tf.constant(False)
     #B,H,doscaling = tf.cond(self.doscaling & self.doiter_old, lambda: doSR1Scaling(B,H,dgrad,dx), lambda: (B,H,self.doscaling))
-    esec,Usec = tf.cond(self.doiter_old, lambda: doSR1Update(esec,Usec,dgrad,dx), lambda: (esec,Usec))  
+    esec,UTsec = tf.cond(self.doiter_old, lambda: doSR1Update(esec,UTsec,dgrad,dx), lambda: (esec,UTsec))  
     
     isconvergedxtol = trustradius_out < xtol
     isconvergededmtol = self.predicted_reduction <= 0.
@@ -471,12 +471,12 @@ class SR1TrustExact:
     def build_sol():
 
       lam = esec
-      U = Usec
+      UT = UTsec
       
       gradcol = tf.reshape(grad,[-1,1])
       
       #projection of gradient onto eigenvectors
-      a = tf.matmul(U, gradcol,transpose_a=True)
+      a = tf.matmul(UT, gradcol)
       a = tf.reshape(a,[-1])
       
       amagsq = tf.reduce_sum(tf.square(a))
@@ -555,10 +555,10 @@ class SR1TrustExact:
       coeffs = -a/(lam+sigma)
       coeffs = tf.reshape(coeffs,[1,-1])
       #p = tf.reduce_sum(coeffs*U, axis=-1)
-      p = tf.matmul(U,tf.reshape(coeffs,[-1,1]))
+      p = tf.matmul(UT,tf.reshape(coeffs,[-1,1]),transpose_a=True)
       p = tf.reshape(p,[-1])
 
-      Umag = tf.sqrt(tf.reduce_sum(tf.square(U),axis=0))
+      Umag = tf.sqrt(tf.reduce_sum(tf.square(UT),axis=1))
       coeffsmag = tf.sqrt(tf.reduce_sum(tf.square(coeffs)))
       pmag = tf.sqrt(tf.reduce_sum(tf.square(p)))
       #p = tf.Print(p,[Umag],message="Umag",summarize=10000)
@@ -587,7 +587,7 @@ class SR1TrustExact:
       alist.append(tf.assign(self.trustradius, trustradius_out))
       alist.append(tf.assign(self.isfirstiter,False)) 
       alist.append(tf.assign(self.e,esec)) 
-      alist.append(tf.assign(self.U,Usec)) 
+      alist.append(tf.assign(self.UT,UTsec)) 
        
     clist = []
     clist.extend(loopout)
