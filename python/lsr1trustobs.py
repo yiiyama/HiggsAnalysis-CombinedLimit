@@ -199,65 +199,9 @@ class SR1TrustExact:
         di = tf.reshape(d,[-1,1])
         dj = tf.reshape(d,[1,-1])
         deltam = (dj-di)/rho
-        #deltamn1 = deltam[:-1]
-
-        #s0mden = deltamn1 - tf.reshape(delta,[-1,1])
-        #s0m = tf.reshape(xisq,[1,-1])/s0mden
-        ##s0m = tf.where(tf.equal(s0mden,0.),tf.zeros_like(s0m),s0m)
-        #s0m = tf.Print(s0m,[tf.shape(s0m)],message="s0mshape")
-        ##protection for case where there is only one unique eigenvalue such that 
-        ##this matrix is empty
-        ##nlower = tf.minimum(1,tf.shape(s0m)[0])
-        ##nlower = 1
-        #nupper = tf.minimum(1,tf.shape(s0m)[0])
-        ##s0mask = tf.matrix_band_part(tf.ones_like(s0m,dtype=tf.bool),nlower,0)
-        #s0mask = tf.matrix_band_part(tf.ones_like(s0m,dtype=tf.bool),tf.zeros_like(nupper),nupper)
-        #s0m = tf.where(s0mask,tf.zeros_like(s0m),s0m)
-        ##s0m = s0m - tf.matrix_band_part(s0m,nlower,0)
-        ##s0m = tf.Print(s0m,[s0mask],message="s0mask",summarize=10000)
-        ##s0m = tf.Print(s0m,[s0m],message="s0m",summarize=10000)
-        #s0 = tf.reduce_sum(s0m,axis=-1)
-        
-        #a0 = 1.+s0
-        #b0 = -(xisqn1 + xisq1 + (1.+s0)*delta)
-        #c0 = xisqn1*delta
-        #t0n1 = (-b0 - tf.sqrt(tf.square(b0) - 4.*a0*c0))/(2*a0)
-        ##t0n1 = tf.where(tf.is_nan(t0n1),tf.zeros_like(t0n1),t0n1)
-        
-        #t0n = tf.reshape(xisq[-1],[-1])
-        #t0 = tf.concat([t0n1,t0n],axis=0)          
-        
-        #dmt0n1 = delta - t0n1
-        
-        #t0 = tf.zeros_like(d)
-        
-        #y0n1 = tf.reciprocal(delta)
-        #y0n1 = rdelta
-        #y0n = tf.reciprocal(rho)
-        #y0n = tf.reshape(y0n,[-1])
-        #y0 = tf.concat([y0n1,y0n],axis=0)
         
         yd0 = tf.zeros_like(d)
-        
-        #t0n1 = tf.zeros_like(delta)
-        #t0n = tf.reshape(xisq[-1],[-1])
-        #t0 = tf.concat([t0n1,t0n],axis=0)
-        
-        #t0n = tf.Print(t0n,[t0n],message="t0n")
-        
-        #t0 = tf.Print(t0,[dmt0n1],message="dmt0n1",summarize=10000)
-
-        
-        #t0 = tf.Print(t0,[s0],message="s0",summarize=10000)
-        #t0 = tf.Print(t0,[a0],message="a0",summarize=10000)
-        #t0 = tf.Print(t0,[b0],message="b0",summarize=10000)
-        #t0 = tf.Print(t0,[c0],message="c0",summarize=10000)
-        #t0 = tf.Print(t0,[t0],message="t0",summarize=10000)
-                  
-        #TODO, consider moving to more robust algorithm to find roots s.t. starting position of 0 and/or delta is valid
-        #Alternatively fix the choice of starting point to avoid this problem (which occurs when xi^2_i and/or xi^2_{i+1}
-        #are much smaller than delta)
-                  
+                          
         nupper = tf.minimum(1,tf.shape(d)[0]-1)
         deltamask = tf.matrix_band_part(tf.ones_like(deltam,dtype=tf.bool),tf.zeros_like(nupper),nupper)
         deltamask = tf.matrix_set_diag(deltamask,tf.zeros_like(d,dtype=tf.bool))
@@ -422,25 +366,6 @@ class SR1TrustExact:
         eout = tf.where(flipsign,eoutalt,eout)
         UTout = tf.where(flipsign,UToutalt,UTout)
         
-        #uout = tf.transpose(UTout)
-        
-        
-        #ufalse = tf.constant(False,shape=uout.shape)
-        #umask = tf.logical_or(tf.equal(tf.reshape(t,[1,-1]),0.),umask)
-        #umask = tf.equal(estart[1:],estart[:-1])
-        #umask = tf.concat([umask,False])
-        #umask = tf.reshape(umask,[1,-1])
-        #umask = tf.logical_or(umask,ufalse)
-        #umask = tf.equal(tf.reshape(eout,[-1,1]),tf.reshape(estart,[1,-1]))
-        #uout = tf.where(umask,Uin,uout)
-        
-        #uout = uout/tf.sqrt(tf.reduce_sum(tf.square(uout),axis=0,keepdims=True))
-        #uout = tf.matmul(Uin,Dinvz,transpose_b=True)/Dinvzmag
-        #uout = tf.matmul(Uin,Dinvz,transpose_b=True)/tf.transpose(Dinvzmag)
-        #uout = tf.where(tf.is_nan(uout),Uin,uout)
-        #umag = tf.sqrt(tf.reduce_sum(tf.square(uout),axis=0))
-        
-        #eout = tf.Print(eout,[eout],message="eout",summarize=1000)
         #uout = tf.Print(uout,[uout],message="uout",summarize=1000)
         #uout = tf.Print(uout,[umag],message="umag",summarize=1000)
         
