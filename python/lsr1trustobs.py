@@ -133,9 +133,12 @@ class SR1TrustExact:
         nonlastidxscol = tf.where(tf.logical_not(islast))
         nonlastidxs = tf.reshape(nonlastidxscol,[-1])
         
+        #TODO, properly deflate for also xisq = 0 case
+        
         zflat = tf.reshape(z,[-1])
         xisq = tf.square(z)
-        xisq2 = tf.segment_sum(xisq,uniqueidxs)
+        #xisq2 = tf.segment_sum(xisq,uniqueidxs)
+        xisq2 = tf.unsorted_segment_sum(xisq,uniqueidxs,tf.shape(unique)[0])
         absz2 = tf.sqrt(xisq2)
         z2 = -absz2
         
@@ -183,42 +186,51 @@ class SR1TrustExact:
         en1 = d[:-1]
         e1 = d[1:]
         delta = (e1 - en1)/rho
-        #delta = tf.Print(delta,[delta],message="delta",summarize=100000)
+        delta = tf.Print(delta,[delta],message="delta",summarize=100000)
         xisqn1 = tf.reshape(xisq[:-1],[-1])
         xisq1 = tf.reshape(xisq[1:],[-1])
+        xisqn = tf.reshape(xisq[-1],[])
         
         di = tf.reshape(d,[-1,1])
         dj = tf.reshape(d,[1,-1])
         deltam = (dj-di)/rho
-        deltamn1 = deltam[:-1]
+        #deltamn1 = deltam[:-1]
 
-        s0mden = deltamn1 - tf.reshape(delta,[-1,1])
-        s0m = tf.reshape(xisq,[1,-1])/s0mden
-        #s0m = tf.where(tf.equal(s0mden,0.),tf.zeros_like(s0m),s0m)
-        s0m = tf.Print(s0m,[tf.shape(s0m)],message="s0mshape")
-        #protection for case where there is only one unique eigenvalue such that 
-        #this matrix is empty
-        #nlower = tf.minimum(1,tf.shape(s0m)[0])
-        #nlower = 1
-        nupper = tf.minimum(1,tf.shape(s0m)[0])
-        #s0mask = tf.matrix_band_part(tf.ones_like(s0m,dtype=tf.bool),nlower,0)
-        s0mask = tf.matrix_band_part(tf.ones_like(s0m,dtype=tf.bool),tf.zeros_like(nupper),nupper)
-        s0m = tf.where(s0mask,tf.zeros_like(s0m),s0m)
-        #s0m = s0m - tf.matrix_band_part(s0m,nlower,0)
-        #s0m = tf.Print(s0m,[s0mask],message="s0mask",summarize=10000)
-        #s0m = tf.Print(s0m,[s0m],message="s0m",summarize=10000)
-        s0 = tf.reduce_sum(s0m,axis=-1)
+        #s0mden = deltamn1 - tf.reshape(delta,[-1,1])
+        #s0m = tf.reshape(xisq,[1,-1])/s0mden
+        ##s0m = tf.where(tf.equal(s0mden,0.),tf.zeros_like(s0m),s0m)
+        #s0m = tf.Print(s0m,[tf.shape(s0m)],message="s0mshape")
+        ##protection for case where there is only one unique eigenvalue such that 
+        ##this matrix is empty
+        ##nlower = tf.minimum(1,tf.shape(s0m)[0])
+        ##nlower = 1
+        #nupper = tf.minimum(1,tf.shape(s0m)[0])
+        ##s0mask = tf.matrix_band_part(tf.ones_like(s0m,dtype=tf.bool),nlower,0)
+        #s0mask = tf.matrix_band_part(tf.ones_like(s0m,dtype=tf.bool),tf.zeros_like(nupper),nupper)
+        #s0m = tf.where(s0mask,tf.zeros_like(s0m),s0m)
+        ##s0m = s0m - tf.matrix_band_part(s0m,nlower,0)
+        ##s0m = tf.Print(s0m,[s0mask],message="s0mask",summarize=10000)
+        ##s0m = tf.Print(s0m,[s0m],message="s0m",summarize=10000)
+        #s0 = tf.reduce_sum(s0m,axis=-1)
         
-        a0 = 1.+s0
-        b0 = -(xisqn1 + xisq1 + (1.+s0)*delta)
-        c0 = xisqn1*delta
-        t0n1 = (-b0 - tf.sqrt(tf.square(b0) - 4.*a0*c0))/(2*a0)
-        #t0n1 = tf.where(tf.is_nan(t0n1),tf.zeros_like(t0n1),t0n1)
+        #a0 = 1.+s0
+        #b0 = -(xisqn1 + xisq1 + (1.+s0)*delta)
+        #c0 = xisqn1*delta
+        #t0n1 = (-b0 - tf.sqrt(tf.square(b0) - 4.*a0*c0))/(2*a0)
+        ##t0n1 = tf.where(tf.is_nan(t0n1),tf.zeros_like(t0n1),t0n1)
         
+        #t0n = tf.reshape(xisq[-1],[-1])
+        #t0 = tf.concat([t0n1,t0n],axis=0)          
+        
+        #dmt0n1 = delta - t0n1
+        
+        #t0 = tf.zeros_like(d)
+        
+        t0n1 = tf.zeros_like(delta)
         t0n = tf.reshape(xisq[-1],[-1])
-        t0 = tf.concat([t0n1,t0n],axis=0)          
+        t0 = tf.concat([t0n1,t0n],axis=0)
         
-        dmt0n1 = delta - t0n1
+        t0n = tf.Print(t0n,[t0n],message="t0n")
         
         #t0 = tf.Print(t0,[dmt0n1],message="dmt0n1",summarize=10000)
 
@@ -233,6 +245,11 @@ class SR1TrustExact:
         #Alternatively fix the choice of starting point to avoid this problem (which occurs when xi^2_i and/or xi^2_{i+1}
         #are much smaller than delta)
                   
+        nupper = tf.minimum(1,tf.shape(d)[0]-1)
+        deltamask = tf.matrix_band_part(tf.ones_like(deltam,dtype=tf.bool),tf.zeros_like(nupper),nupper)
+        #deltamask = tf.matrix_band_part(tf.ones_like(deltam,dtype=tf.bool),nupper,tf.zeros_like(nupper))
+
+                  
         unconverged0 = tf.ones_like(t0,dtype=tf.bool)
                   
         loop_vars = [t0,unconverged0,tf.constant(0)]
@@ -240,77 +257,106 @@ class SR1TrustExact:
           return tf.reduce_any(unconverged) & (j<50)
         
         def body(t,unconverged,j):
-          psim = tf.reshape(xisq,[1,-1])/(deltam - tf.reshape(t,[-1,1]))
-          #psimtrue = tf.ones_like(psim,dtype=tf.bool)
-          #psimmask = tf.matrix_set_diag(tf.matrix_band_part(psimtrue,0,1), tf.zeros_like(t,dtype=tf.bool))
-          #psim = tf.where(psimmask,tf.zeros_like(psim),psim)
-          absden = tf.abs(deltam - tf.reshape(t,[-1,1]))
-          minabsden = tf.reduce_min(absden)
-          minabsdenidxs = tf.where(tf.equal(absden,minabsden))
-          psim = tf.Print(psim,[minabsden],message="minabsden")
-          psim = tf.Print(psim,[minabsdenidxs],message="minabsdenidxs",summarize=1000)
-          #nullidxs = tf.where(tf.equal(absden,0.))
-          #psim = tf.Print(psim,[nullidxs],message="nullidxs")
-          nullidx = minabsdenidxs[0][0]
-          dmtn1 = delta - t[:-1]
-          psim = tf.Print(psim,[delta[nullidx]],message="deltanull")
-          psim = tf.Print(psim,[xisqn1[nullidx]],message="xisqn1null")
-          psim = tf.Print(psim,[xisq1[nullidx]],message="xisq1null")
-          psim = tf.Print(psim,[s0[nullidx]],message="s0null")
-          psim = tf.Print(psim,[a0[nullidx]],message="a0null")
-          psim = tf.Print(psim,[b0[nullidx]],message="b0null")
-          psim = tf.Print(psim,[c0[nullidx]],message="c0null")
-          psim = tf.Print(psim,[t0[nullidx]],message="t0null")
-          psim = tf.Print(psim,[dmt0n1[nullidx]],message="dmt0n1null")
-          psim = tf.Print(psim,[t[nullidx]],message="tnull")
-          psim = tf.Print(psim,[dmtn1[nullidx]],message="dmtn1null")
+          frden = tf.reciprocal(deltam - tf.reshape(t,[-1,1]))
+          #exclude j=i and j=i+1 terms
+          frden = tf.where(deltamask,tf.zeros_like(frden),frden)
+          xisqj = tf.reshape(xisq,[1,-1])
+          s0arg = xisqj*frden
+          s1arg = s0arg*frden
+          s2arg = s1arg*frden
           
+          s0 = tf.reduce_sum(s0arg, axis=-1)
+          s1 = tf.reduce_sum(s1arg, axis=-1)
           
-          psi = tf.diag_part(tf.cumsum(psim,axis=-1))
-          psifull = tf.reduce_sum(psim,axis=-1)
-          phi = psifull - psi
-          w = 1. + phi + psi
-          #w = tf.where(tf.is_nan(w),tf.zeros_like(w),w)
+          t2 = tf.square(t)
           
-          psiprimem = tf.reshape(xisq,[1,-1])/tf.square(deltam - tf.reshape(t,[-1,1]))
-          #psiprimem = tf.where(psimmask,tf.zeros_like(psiprimem),psiprimem)
-          psiprime = tf.diag_part(tf.cumsum(psiprimem, axis=-1))
-          psiprimefull = tf.reduce_sum(psiprimem,axis=-1)
-          phiprime = psiprimefull - psiprime
-          
-          #first n-1 terms
-          psin1 = psi[:-1]
-          phin1 = phi[:-1]
-          psiprimen1 = psiprime[:-1]
-          phiprimen1 = phiprime[:-1]
-          wn1 = w[:-1]
           tn1 = t[:-1]
-          Delta = delta - tn1
-
-          c = 1. + phin1 - Delta*phiprimen1
-          b = (Delta*wn1*psin1)/(psiprimen1*c)
-          a = (Delta*(1.+phin1)+tf.square(psin1)/psiprimen1)/c + psin1/psiprimen1
-          tn1 = tn1 + 2.*b/(a + tf.sqrt(tf.square(a) - 4.*b))
+          t2n1 = t2[:-1]
+          t3n1 = t2n1*tn1
           
-          #last term
-          psin = psi[-1]
-          psiprimen = psiprime[-1]
-          tn = t[-1] + (1.+psin)*psin/psiprimen
+          dtn1 = delta-tn1
+          dt2n1 = tf.square(dtn1)
+          dt3n1 = dt2n1*dtn1
+          
+          s0n1 = s0[:-1]
+          s1n1 = s1[:-1]
+          s2n1 = tf.reduce_sum(s2arg[:-1], axis=-1)
+          
+          tn = t[-1]
+          t2n = t2[-1]
+          s0n = s0[-1]
+          s1n = s1[-1]
+          
+          fn1 = 1. + s0n1 - xisqn1/tn1 + xisq1/dtn1
+          fn = 1. + s0n - xisqn/tn
+          fn = tf.reshape(fn,[-1])
+          f = tf.concat([fn1,fn],axis=0)
+          
+          magw = tf.sqrt(tf.reduce_sum(tf.square(f)))
+          
+          #s2n1 = tf.Print(s2n1,[tf.shape(s2n1)],message="shape s2n1")
+          #s2n1 = tf.Print(s2n1,[tf.shape(tn1)],message="shape tn1")
+          #s2n1 = tf.Print(s2n1,[tf.shape(dt3n1)],message="shape dt3n1")
+          #s2n1 = tf.Print(s2n1,[tf.shape(s1n1)],message="shape s1n1")
+          #s2n1 = tf.Print(s2n1,[tf.shape(dt3n1)],message="shape dt3n1")
+          #s2n1 = tf.Print(s2n1,[tf.shape(xisq1)],message="shape xisq1")
+          #s2n1 = tf.Print(s2n1,[tf.shape(delta)],message="shape delta")
+          
+          cn1 = (s2n1*tn1*dt3n1 + s1n1*dt3n1 + xisq1*delta)/delta
+          bn1 = (s2n1*t3n1*dtn1 - s1n1*t3n1 - xisqn1*delta)/delta
+          an1 = 1. + s0n1 - s2n1*tn1*dtn1 + s1n1*(2.*tn1 - delta)
+          
+          coeffn1 = bn1-an1*delta-cn1
+          #sqrtarg = (bn1-cn1)*(bn1-cn1+2.*an1*delta)
+          sqrtarg = tf.square(coeffn1) + 4.*an1*bn1*delta
+          sqrtarg = tf.Print(sqrtarg,[sqrtarg],message="sqrtarg",summarize=10000)
+          #sqrtarg = tf.maximum(sqrtarg, tf.zeros_like(sqrtarg))
+          tn1 = 0.5*(-coeffn1 - tf.sqrt(sqrtarg))/an1
+          #tn1 = 0.5*(-coeffn1 + tf.sqrt(tf.square(coeffn1) + 4.*an1*bn1*delta))/an1
+
+          #bn = -s1n*t2n - xisqn
+          #an = 1. + s0n + s1n*tn
+          #tn = -bn/an
+          #this is from the BNS1 method
+          #psin = s0n - xisqn/tn
+          #psiprimen = s1n + xisqn/t2n
+          #tn = tn + (1. + psin)*psin/psiprimen
+          
+          tn = tn + (tn + s0n*tn - xisqn)*(s0n*tn - xisqn)/(s1n*t2n + xisqn)
           tn = tf.reshape(tn,[-1])
+          
+          
+          
+          #tn = tf.Print(tn, [s0n],message="s0n")
+          #tn = tf.Print(tn, [s1n],message="s1n")
+          #tn = tf.Print(tn, [xisqn],message="xisqn")
+          ##tn = tf.Print(tn, [bn],message="bn")
+          ##tn = tf.Print(tn, [an],message="an")
+          #tn = tf.Print(tn, [tn],message="tn")
           
           told = t
           t = tf.concat([tn1,tn],axis=0)
-          #t = tf.where(tf.is_nan(t),t0,t)
-          #t = tf.where(tf.is_nan(t),tf.zeros_like(t),t)
           
+          
+          #t = tf.Print(t,[delta],message="delta",summarize=10000)
+          #t = tf.Print(t,[frden],message="frden",summarize=10000)
+          ##t = tf.Print(t,[f],message="f",summarize=10000)
+          ##t = tf.Print(t,[fp],message="fp",summarize=10000)
+          ##t = tf.Print(t,[fpp],message="fpp",summarize=10000)
+          #t = tf.Print(t,[cn1],message="cn1",summarize=10000)
+          #t = tf.Print(t,[bn1],message="bn1",summarize=10000)
+          #t = tf.Print(t,[an1],message="an1",summarize=10000)
+          #t = tf.Print(t,[sqrtarg],message="sqrtarg",summarize=10000)
+          t = tf.Print(t,[t],message="t",summarize=10000)
+                    
           #when individual eigenvalues have converged we mark them as such
           #but simply keep iterating on the full vector, since any efficiency
           #gains from partially stopping and chopping up the vector would likely incur
           #more overhead, especially on GPU
           tadvancing = t > told
           unconverged = unconverged & tadvancing
-                                  
-          magw = tf.sqrt(tf.reduce_sum(tf.square(w)))
+                                 
+
 
           #t = tf.Print(t,[psi],message="psi",summarize=10000)
           #t = tf.Print(t,[phi],message="phi",summarize=10000)
@@ -321,6 +367,7 @@ class SR1TrustExact:
           #t = tf.Print(t,[c],message="c",summarize=10000)
           #t = tf.Print(t,[t],message="t",summarize=10000)
           #t = tf.Print(t,[w],message="w",summarize=1000)
+          #t = tf.Print(t,[f],message="f",summarize=10000)
           t = tf.Print(t,[magw],message="magw")
           
           return (t,unconverged,j+1)
@@ -499,7 +546,7 @@ class SR1TrustExact:
       Umag = tf.sqrt(tf.reduce_sum(tf.square(U),axis=0))
       coeffsmag = tf.sqrt(tf.reduce_sum(tf.square(coeffs)))
       pmag = tf.sqrt(tf.reduce_sum(tf.square(p)))
-      p = tf.Print(p,[Umag],message="Umag")
+      p = tf.Print(p,[Umag],message="Umag",summarize=10000)
       p = tf.Print(p,[pmag,coeffsmag,sigma],message="pmag,coeffsmag,sigma")
 
       #predicted reduction also computed directly from eigenvalues and eigenvectors
