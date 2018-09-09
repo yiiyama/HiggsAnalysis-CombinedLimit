@@ -105,7 +105,7 @@ class SR1TrustExact:
         signedrho = tf.Print(signedrho,[signedrho],message="signedrho")
         rho = tf.abs(signedrho)
 
-        enorm = ein/signedrho
+        #enorm = ein/signedrho
 
         flipsign = signedrho < 0.
         
@@ -113,51 +113,88 @@ class SR1TrustExact:
         #to ensure consistent ordering
         #z needs to be reversed as well since it was already computed with the original ordering
         einalt = -tf.reverse(ein,axis=(0,))
-        enormalt = tf.reverse(enorm,axis=(0,))
+        #enormalt = tf.reverse(enorm,axis=(0,))
         UTinalt = tf.reverse(UTin,axis=(0,))
         zalt = tf.reverse(z,axis=(0,))
         
         estart = tf.where(flipsign,einalt,ein)
-        enormstart = tf.where(flipsign,enormalt,enorm)
+        #enormstart = tf.where(flipsign,enormalt,enorm)
         UTstart = tf.where(flipsign,UTinalt,UTin)
         z = tf.where(flipsign,zalt,z)
         
+        estart = tf.Print(estart,[estart],message="estart",summarize=10000)
+        
         #deflation in case of repeated eigenvalues
-        unique, uniqueidxs, uniquecounts = tf.unique_with_counts(estart)
-        #these are the indices of the eigenvalue-eigenvector pairs which are expected to change
-        firstidxs = tf.cumsum(uniquecounts, exclusive=True)
+        #changeidxs = tf.where(tf.logical_not(tf.equal(estart[:-1], estart[1:])))
+        #lastidxs = tf.concat([changeidxs,tf.constant(var.shape[0]-1,shape=[1,1]],axis=0))
+        #firstidxs = tf.concat([tf.constant(0,shape=[1,1]),changeidxs+1], axis=0)
+        #unique = tf.gather_nd(estart,lastidxs)
+        #r = lastidxs - firstidxs + 1
+        #r = tf.reshape(r,[-1])
+        #uniqueisrep = r > 1
+        #uniquerepidxs = tf.where(uniqueisrep)
         
-        lastidxs = firstidxs + uniquecounts - 1
-        lastidxscol = tf.reshape(lastidxs,[-1,1])
+        unique, uniqueidxs, r = tf.unique_with_counts(estart)
+        ##these are the indices of the eigenvalue-eigenvector pairs which are expected to change
+        firstidxs = tf.cumsum(r, exclusive=True)
+        lastidxs = firstidxs + r - 1
+        firstidxs = tf.reshape(firstidxs,[-1,1])
+        lastidxs = tf.reshape(lastidxs,[-1,1])
+        uniqueisrep = r > 1
+        uniquerepidxs = tf.where(uniqueisrep)
         
-        islast = tf.scatter_nd(lastidxscol,tf.ones_like(unique,dtype=tf.bool),estart.shape)
-        nonlastidxscol = tf.where(tf.logical_not(islast))
-        nonlastidxs = tf.reshape(nonlastidxscol,[-1])
+        #lastidxsrep = tf.gather_nd(lastidxs, uniquerepidxs)
+        uniquesingleidxs = tf.where(tf.logical_not(uniqueisrep))
+        singleidxs = tf.gather_nd(lastidxs,uniquesingleidxs)
+        singletrue = tf.ones(dtype=tf.bool,shape=[tf.shape(singleidxs)[0]])
+        issingle = tf.scatter_nd(singleidxs, singletrue, estart.shape)
+        isrep = tf.logical_not(issingle)
+        repidxs = tf.where(isrep)
+
+        islast = tf.scatter_nd(lastidxs,tf.ones_like(unique,dtype=tf.bool),estart.shape)
+        nonlastidxs = tf.where(tf.logical_not(islast))
+        
+        #unique, uniqueidxs, uniquecounts = tf.unique_with_counts(estart)
+        ##these are the indices of the eigenvalue-eigenvector pairs which are expected to change
+        #firstidxs = tf.cumsum(uniquecounts, exclusive=True)
+        
+        #lastidxs = firstidxs + uniquecounts - 1
+        #lastidxscol = tf.reshape(lastidxs,[-1,1])
+        
+        #islast = tf.scatter_nd(lastidxscol,tf.ones_like(unique,dtype=tf.bool),estart.shape)
+        #nonlastidxscol = tf.where(tf.logical_not(islast))
+        #nonlastidxs = tf.reshape(nonlastidxscol,[-1])
         
         #TODO, properly deflate for also xisq = 0 case (this is probably not strictly needed)
         
         zflat = tf.reshape(z,[-1])
-        xisq = tf.square(z)
+        absz = tf.abs(zflat)
+        xisq = tf.square(zflat)
+        
         #xisq2 = tf.segment_sum(xisq,uniqueidxs)
         xisq2 = tf.unsorted_segment_sum(xisq,uniqueidxs,tf.shape(unique)[0])
         absz2 = tf.sqrt(xisq2)
-        z2 = -absz2
+        #z2 = -absz2
         
-        #TODO Consider also moving the splitting of repeating vs nonrepeating
-        #eigenvalues outside of the deflation
+        #TODO cleanup handling of indices, scatter, gather, unique for deflation
+        #TODO skip inflation entirely in case there are no repeating eigenvalues
         
         #arr0 = tf.TensorArray(var.dtype,size=tf.shape(unique)[0],infer_shape=False,element_shape=[None,var.shape[0]])
-        arr0 = tf.TensorArray(var.dtype,size=tf.shape(unique)[0],infer_shape=False,element_shape=[None,var.shape[0]])
+        arrsize = tf.shape(uniquerepidxs)[0]
+        arr0 = tf.TensorArray(var.dtype,size=arrsize,infer_shape=False,element_shape=[None,var.shape[0]])
         deflate_var_list = [arr0, tf.constant(0,dtype=tf.int32)]
         def deflate_cond(arr,j):
-          return j<arr.size()
+          return j<arrsize
         def deflate_body(arr,j):
-          size = uniquecounts[j]
-          startidx = firstidxs[j]
+          uniquerepidx = tf.reshape(uniquerepidxs[j],[])
+          size = r[uniquerepidx]
+          startidx = tf.reshape(firstidxs[uniquerepidx],[])
           endidx = startidx + size
           zsub = zflat[startidx:endidx]
           UTsub = UTstart[startidx:endidx]
-          magzsub = absz2[j]
+          magzsub = absz2[uniquerepidx]
+          #magzsqsub = tf.reduce_sum(tf.square(zsub))
+          #magzsub = tf.sqrt(magzsqsub)
           en = tf.one_hot(size-1,depth=size,dtype=zsub.dtype)
           #this is the vector which implicitly defines the Householder transformation matrix
           v = zsub/magzsub + en
@@ -171,12 +208,19 @@ class SR1TrustExact:
           return (arr, j+1)
         
         UTbararr,j = tf.while_loop(deflate_cond,deflate_body,deflate_var_list, parallel_iterations=64, back_prop=False)
-        UTbar = UTbararr.concat()
-                
-        UT1 = tf.gather(UTbar,nonlastidxs)     
-        UT2 = tf.gather(UTbar,lastidxs)
-            
+        UTbarrep = UTbararr.concat()
         
+        UTbar = tf.where(issingle, UTstart, tf.scatter_nd(repidxs,UTbarrep, shape=UTstart.shape))
+        zbar = tf.where(issingle, zflat, tf.scatter_nd(lastidxs,-absz2, shape=zflat.shape))
+        
+        UT1 = tf.gather_nd(UTbar,nonlastidxs)     
+        UT2 = tf.gather_nd(UTbar,lastidxs)
+        z2 = tf.gather_nd(zbar,lastidxs)
+        
+        #z2 = tf.where(issingle, tf.gather_nd(zflat,lastid
+
+        #z2 = tf.where(uniqueisrep, 
+                    
         unique = tf.Print(unique,[unique],message="unique")
         
         d = unique
@@ -356,8 +400,8 @@ class SR1TrustExact:
                 
         #now put everything back together
         #eigenvalues are still guaranteed to be sorted
-        eout = estart + tf.scatter_nd(lastidxscol,deltae2,estart.shape)
-        UTout = tf.scatter_nd(lastidxscol,UT2out,UTstart.shape) + tf.scatter_nd(nonlastidxscol,UT1,UTstart.shape)
+        eout = estart + tf.scatter_nd(lastidxs,deltae2,estart.shape)
+        UTout = tf.scatter_nd(lastidxs,UT2out,UTstart.shape) + tf.scatter_nd(nonlastidxs,UT1,UTstart.shape)
         
         #restore correct order and signs if necessary
         eoutalt = -tf.reverse(eout,axis=(0,))
