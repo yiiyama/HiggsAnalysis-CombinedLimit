@@ -135,8 +135,13 @@ class SR1TrustExact:
         isrep = tf.logical_not(issingle)
         repidxs = tf.where(isrep)
         
+        islast = tf.scatter_nd(lastidxs,tf.ones_like(r,dtype=tf.bool),estart.shape)
+        nonlastidxs = tf.where(tf.logical_not(islast))
+        
         zflat = tf.reshape(z,[-1])
         
+        #TODO (maybe) further streamlining of deflation, maybe going back to segment sum 
+        #implementation for xisq
         #TODO (maybe) skip inflation entirely in case there are no repeating eigenvalues
         
         arrsize = tf.shape(uniquerepidxs)[0]
@@ -174,18 +179,15 @@ class SR1TrustExact:
         UTbarrep = UTbararr.concat()
         zbarrep = zbararr.concat()
         
+        #reassemble transformed eigenvectors and update vector
         UTbar = tf.where(issingle, UTstart, tf.scatter_nd(repidxs,UTbarrep, shape=UTstart.shape))
         zbar = tf.where(issingle, zflat, tf.scatter_nd(repidxs,zbarrep, shape=zflat.shape))
                 
-        #deflation for z=0 case (this by construction covers also the repeated eigenvectors)
-        zbarnull = tf.equal(zbar,0.)
-        staticidxs = tf.where(zbarnull)
-        dynamicidxs = tf.where(tf.logical_not(zbarnull))
-        
-        UT1 = tf.gather_nd(UTbar,staticidxs)     
-        UT2 = tf.gather_nd(UTbar,dynamicidxs)
-        z2 = tf.gather_nd(zbar,dynamicidxs)
-        d = tf.gather_nd(estart,dynamicidxs)
+        #construct deflated system
+        UT1 = tf.gather_nd(UTbar,nonlastidxs)     
+        UT2 = tf.gather_nd(UTbar,lastidxs)
+        z2 = tf.gather_nd(zbar,lastidxs)
+        d = tf.gather_nd(estart,lastidxs)
         
         xisq = tf.square(z2)
         
@@ -352,8 +354,8 @@ class SR1TrustExact:
                         
         #now put everything back together
         #eigenvalues are still guaranteed to be sorted
-        eout = estart + tf.scatter_nd(dynamicidxs,deltae2,estart.shape)
-        UTout = tf.scatter_nd(dynamicidxs,UT2out,UTstart.shape) + tf.scatter_nd(staticidxs,UT1,UTstart.shape)
+        eout = estart + tf.scatter_nd(lastidxs,deltae2,estart.shape)
+        UTout = tf.scatter_nd(lastidxs,UT2out,UTstart.shape) + tf.scatter_nd(nonlastidxs,UT1,UTstart.shape)
         
         #restore correct order and signs if necessary
         eoutalt = -tf.reverse(eout,axis=(0,))
@@ -414,6 +416,12 @@ class SR1TrustExact:
       abarsq = tf.reshape(abarsq,[-1])
       lambar = tf.reshape(lambar, [-1])
       
+      #TODO, avoid use of unique here, since eigenvalues are sorted, so this
+      #can be done with an O(n) operation instead
+      #(but still need to figure out how to efficiently construct the indices for
+      #the segment sum in this case)
+      #Should also switch from unsorted_segment_sum to segment_sum,
+      #which should not need padding, given that zeros have already been removed
       lambar, abarindicesu = tf.unique(lambar)
       abarsq = tf.unsorted_segment_sum(abarsq,abarindicesu,tf.shape(lambar)[0])
       
