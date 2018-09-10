@@ -118,7 +118,7 @@ class SR1TrustExact:
         UTstart = tf.where(flipsign,UTinalt,UTin)
         z = tf.where(flipsign,zalt,z)
         
-        estart = tf.Print(estart,[estart],message="estart",summarize=10000)
+        #estart = tf.Print(estart,[estart],message="estart",summarize=10000)
         
         #deflation in case of repeated eigenvalues
         estartn1 = estart[:-1]
@@ -414,7 +414,7 @@ class SR1TrustExact:
       
       #deal with null gradient components and repeated eigenvectors
       lamn1 = lam[:-1]
-      lam1 = lam[1]
+      lam1 = lam[1:]
       ischange = tf.logical_not(tf.equal(lamn1,lam1))
       islast = tf.concat([ischange,[True]],axis=0)
       lastidxs = tf.where(islast)
