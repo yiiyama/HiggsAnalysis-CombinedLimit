@@ -31,6 +31,7 @@ class SR1TrustExact:
     return tf.group(alist)
   
   def minimize(self, loss, var, grad = None):
+    #TODO, consider replacing gather_nd with gather where appropriate (maybe faster?)
     
     if grad is None:
       grad = tf.gradients(loss,var, gate_gradients=True)[0]
@@ -117,7 +118,7 @@ class SR1TrustExact:
         UTstart = tf.where(flipsign,UTinalt,UTin)
         z = tf.where(flipsign,zalt,z)
         
-        #estart = tf.Print(estart,[estart],message="estart",summarize=10000)
+        estart = tf.Print(estart,[estart],message="estart",summarize=10000)
         
         #deflation in case of repeated eigenvalues
         estartn1 = estart[:-1]
@@ -138,31 +139,36 @@ class SR1TrustExact:
         rrep = tf.reshape(rrep,[-1])
         
         repidxs = tf.where(isrep)
+        firstidxs = tf.where(isfirst)
         lastidxs = tf.where(islast)
+        r = lastidxs - firstidxs + 1
+        r = tf.reshape(r,[-1])
+        isrepunique = r > 1
+        uniquerepidxs = tf.where(isrepunique)
         nonlastidxs = tf.where(tf.logical_not(islast))
                 
         zflat = tf.reshape(z,[-1])
         
-        #TODO (maybe) going back to segment sum implementation for xisq
+        uniqueidxs = tf.cumsum(tf.cast(islast,tf.int32),exclusive=True)
+        xisq2 = tf.segment_sum(tf.square(zflat),uniqueidxs)
+        
+        xisqrep = tf.gather_nd(xisq2,uniquerepidxs)
+        abszrep = tf.sqrt(xisqrep)
+        
         #TODO (maybe) skip inflation entirely in case there are no repeating eigenvalues
         
         arrsize = tf.shape(firstidxsrep)[0]
         arr0 = tf.TensorArray(var.dtype,size=arrsize,infer_shape=False,element_shape=[None,var.shape[0]])
-        arrz0 = tf.TensorArray(var.dtype,size=arrsize,infer_shape=False,element_shape=[None])
-        deflate_var_list = [arr0, arrz0, tf.constant(0,dtype=tf.int32)]
-        def deflate_cond(arr,arrz,j):
+        deflate_var_list = [arr0, tf.constant(0,dtype=tf.int32)]
+        def deflate_cond(arr,j):
           return j<arrsize
-        def deflate_body(arr,arrz,j):
-          #uniquerepidx = tf.reshape(uniquerepidxs[j],[])
+        def deflate_body(arr,j):
           size = rrep[j]
           startidx = tf.reshape(firstidxsrep[j],[])
           endidx = startidx + size
           zsub = zflat[startidx:endidx]
           UTsub = UTstart[startidx:endidx]
-          #magzsub = absz2[uniquerepidx]
-          #magzsqsub = tf.reduce_sum(tf.square(zsub))
-          #magzsub = tf.sqrt(magzsqsub)
-          magzsub = tf.sqrt(tf.reduce_sum(tf.square(zsub)))
+          magzsub = abszrep[j]
           en = tf.one_hot(size-1,depth=tf.cast(size,tf.int32),dtype=zsub.dtype)
           #this is the vector which implicitly defines the Householder transformation matrix
           v = zsub/magzsub + en
@@ -172,26 +178,23 @@ class SR1TrustExact:
           nullv = tf.reduce_all(tf.equal(tf.sign(zsub),-en))
           v = tf.where(nullv,tf.zeros_like(v),v)
           UTbarsub = UTsub - 2.*tf.matmul(v,tf.matmul(v,UTsub,transpose_a=True))
-          zbarsub = -magzsub*en
           arr = arr.write(j,UTbarsub)
-          arrz = arrz.write(j,zbarsub)
-          return (arr, arrz, j+1)
+          return (arr, j+1)
         
-        UTbararr,zbararr,j = tf.while_loop(deflate_cond,deflate_body,deflate_var_list, parallel_iterations=64, back_prop=False)
+        UTbararr,j = tf.while_loop(deflate_cond,deflate_body,deflate_var_list, parallel_iterations=64, back_prop=False)
         UTbarrep = UTbararr.concat()
-        zbarrep = zbararr.concat()
         
-        #reassemble transformed eigenvectors and update vector
+        #reassemble transformed eigenvectors
         UTbar = tf.where(issingle, UTstart, tf.scatter_nd(repidxs,UTbarrep, shape=UTstart.shape))
-        zbar = tf.where(issingle, zflat, tf.scatter_nd(repidxs,zbarrep, shape=zflat.shape))
+        zbar = tf.where(issingle, zflat, tf.scatter_nd(lastidxsrep,-abszrep, shape=zflat.shape))
                 
         #construct deflated system
         UT1 = tf.gather_nd(UTbar,nonlastidxs)     
         UT2 = tf.gather_nd(UTbar,lastidxs)
-        z2 = tf.gather_nd(zbar,lastidxs)
         d = tf.gather_nd(estart,lastidxs)
+        z2 = tf.gather_nd(zbar,lastidxs)
         
-        xisq = tf.square(z2)
+        xisq = xisq2
         
         en1 = d[:-1]
         e1 = d[1:]
@@ -410,22 +413,21 @@ class SR1TrustExact:
       asq = tf.square(a)
       
       #deal with null gradient components and repeated eigenvectors
-
-      abarindices = tf.where(asq)
-      abarsq = tf.gather(asq,abarindices)
-      lambar = tf.gather(lam,abarindices)
-
-      abarsq = tf.reshape(abarsq,[-1])
-      lambar = tf.reshape(lambar, [-1])
+      lamn1 = lam[:-1]
+      lam1 = lam[1]
+      ischange = tf.logical_not(tf.equal(lamn1,lam1))
+      islast = tf.concat([ischange,[True]],axis=0)
+      lastidxs = tf.where(islast)
+      uniqueidx = tf.cumsum(tf.cast(islast,tf.int32),exclusive=True)
+      uniqueasq = tf.segment_sum(asq,uniqueidx)
+      uniquelam = tf.gather_nd(lam,lastidxs)
       
-      #TODO, avoid use of unique here, since eigenvalues are sorted, so this
-      #can be done with an O(n) operation instead
-      #(but still need to figure out how to efficiently construct the indices for
-      #the segment sum in this case)
-      #Should also switch from unsorted_segment_sum to segment_sum,
-      #which should not need padding, given that zeros have already been removed
-      lambar, abarindicesu = tf.unique(lambar)
-      abarsq = tf.unsorted_segment_sum(abarsq,abarindicesu,tf.shape(lambar)[0])
+      abarindices = tf.where(uniqueasq)
+      abarsq = tf.gather_nd(uniqueasq,abarindices)
+      lambar = tf.gather_nd(uniquelam,abarindices)
+
+      #abarsq = tf.reshape(abarsq,[-1])
+      #lambar = tf.reshape(lambar, [-1])
       
       abar = tf.sqrt(abarsq)
        
