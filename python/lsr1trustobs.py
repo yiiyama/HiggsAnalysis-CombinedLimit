@@ -120,40 +120,42 @@ class SR1TrustExact:
         #estart = tf.Print(estart,[estart],message="estart",summarize=10000)
         
         #deflation in case of repeated eigenvalues
-        changeidxs = tf.where(tf.logical_not(tf.equal(estart[:-1], estart[1:])))
-        firstidxs = tf.concat([tf.constant(0,shape=[1,1],dtype=changeidxs.dtype),changeidxs+1], axis=0)
-        lastidxs = tf.concat([changeidxs,tf.constant(int(var.shape[0])-1,shape=[1,1],dtype=changeidxs.dtype)],axis=0)
-        r = lastidxs - firstidxs + 1
-        r = tf.reshape(r,[-1])
-        uniqueisrep = r > 1
-        uniquerepidxs = tf.where(uniqueisrep)
-        
-        uniquesingleidxs = tf.where(tf.logical_not(uniqueisrep))
-        singleidxs = tf.gather_nd(lastidxs,uniquesingleidxs)
-        singletrue = tf.ones(dtype=tf.bool,shape=[tf.shape(singleidxs)[0]])
-        issingle = tf.scatter_nd(singleidxs, singletrue, estart.shape)
+        estartn1 = estart[:-1]
+        estart1 = estart[1:]
+        ischange = tf.logical_not(tf.equal(estartn1,estart1))
+        isfirst = tf.concat([[True],ischange],axis=0)
+        islast = tf.concat([ischange,[True]],axis=0)
+        islast1 = islast[1:]
+        issingle1 = tf.logical_and(ischange,islast1)
+        issingle = tf.concat([ischange[0:1], issingle1],axis=0)
         isrep = tf.logical_not(issingle)
+        isfirstrep = tf.logical_and(isfirst,isrep)
+        islastrep = tf.logical_and(islast,isrep)
+        
+        firstidxsrep = tf.where(isfirstrep)
+        lastidxsrep = tf.where(islastrep)
+        rrep = lastidxsrep - firstidxsrep + 1
+        rrep = tf.reshape(rrep,[-1])
+        
         repidxs = tf.where(isrep)
-        
-        islast = tf.scatter_nd(lastidxs,tf.ones_like(r,dtype=tf.bool),estart.shape)
+        lastidxs = tf.where(islast)
         nonlastidxs = tf.where(tf.logical_not(islast))
-        
+                
         zflat = tf.reshape(z,[-1])
         
-        #TODO (maybe) further streamlining of deflation, maybe going back to segment sum 
-        #implementation for xisq
+        #TODO (maybe) going back to segment sum implementation for xisq
         #TODO (maybe) skip inflation entirely in case there are no repeating eigenvalues
         
-        arrsize = tf.shape(uniquerepidxs)[0]
+        arrsize = tf.shape(firstidxsrep)[0]
         arr0 = tf.TensorArray(var.dtype,size=arrsize,infer_shape=False,element_shape=[None,var.shape[0]])
         arrz0 = tf.TensorArray(var.dtype,size=arrsize,infer_shape=False,element_shape=[None])
         deflate_var_list = [arr0, arrz0, tf.constant(0,dtype=tf.int32)]
         def deflate_cond(arr,arrz,j):
           return j<arrsize
         def deflate_body(arr,arrz,j):
-          uniquerepidx = tf.reshape(uniquerepidxs[j],[])
-          size = r[uniquerepidx]
-          startidx = tf.reshape(firstidxs[uniquerepidx],[])
+          #uniquerepidx = tf.reshape(uniquerepidxs[j],[])
+          size = rrep[j]
+          startidx = tf.reshape(firstidxsrep[j],[])
           endidx = startidx + size
           zsub = zflat[startidx:endidx]
           UTsub = UTstart[startidx:endidx]
@@ -450,6 +452,8 @@ class SR1TrustExact:
         phiprime = tf.pow(pmagsq,-1.5)*tf.reduce_sum(abarsq/tf.pow(lambar+s,3))
         return (phi, phiprime)
         
+      
+      #TODO, add handling of additional cases here (singular and "hard" cases)
       
       phisigma0 = phif(sigma0)
       usesolu = tf.logical_and(e0>0. , phisigma0 >= 0.)
