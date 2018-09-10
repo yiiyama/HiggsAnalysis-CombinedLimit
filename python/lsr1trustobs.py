@@ -215,7 +215,7 @@ class SR1TrustExact:
         
         yd0 = tf.zeros_like(d)
                           
-        nupper = tf.minimum(1,tf.shape(d)[0]-1)
+        nupper = tf.minimum(1,tf.shape(d)[0])
         deltamask = tf.matrix_band_part(tf.ones_like(deltam,dtype=tf.bool),tf.zeros_like(nupper),nupper)
         deltamask = tf.matrix_set_diag(deltamask,tf.zeros_like(d,dtype=tf.bool))
                   
@@ -325,37 +325,43 @@ class SR1TrustExact:
           
           
         yd,unconverged,j = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
+        yd0idxs = tf.where(tf.equal(yd,0.))
+        xisqi = tf.gather_nd(xisq,yd0idxs)
+        xisqi1 = tf.gather_nd(xisq,yd0idxs+1)
+        #yd = tf.Print(yd,[yd],message="yd",summarize=10000)
+        yd = tf.Print(yd,[xisqi],message="xisqi",summarize=10000)
+        yd = tf.Print(yd,[xisqi1],message="xisqi1",summarize=10000)
         syd = yd + rdelta
         t = tf.reciprocal(syd)
         deltae2 = rho*t
         
-        #now compute eigenvectors        
+        #now compute eigenvectors
+        ydi = tf.reshape(yd,[-1,1])
         sydi = tf.reshape(syd,[-1,1])
+        rdeltai = tf.reshape(rdelta,[-1,1])
         frden = tf.reciprocal(deltam*sydi - 1.)
+        frden = tf.matrix_set_diag(frden,-tf.ones_like(yd))
         Dinv = sydi*frden
+        Dinvalt = tf.reshape(rdelta*syd/yd,[-1,1]) + tf.zeros_like(Dinv)
+        Dinv = tf.where(deltamask,Dinvalt,Dinv)
 
         Dinvz = Dinv*tf.reshape(z2,[1,-1])
-        #Dinz = tf.where(tf.equal(D,0.),tf.ones_like(Dinvz),Dinvz)
-        #Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1))
         Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=-1,keepdims=True))
-        #Dinvzmag = tf.Print(Dinvzmag,[Dinvzmag],message="Dinvzmag",summarize=10000)
         Dinvz = Dinvz/Dinvzmag
-        ##Dinvzmag = tf.sqrt(tf.reduce_sum(tf.square(Dinvz),axis=0))
         
         #n.b. this is the most expensive operation (matrix-matrix multiplication to compute the updated eigenvectors)
         UT2out = tf.matmul(Dinvz,UT2)
         
         #protections for yd=0 or infinity cases
-        #TODO check that the two cases are handled correctly
+        #TODO consider improving protection by taylor expanding in xisq_{i+1}/delta or similar
         UT21 = tf.concat([UT2[1:],UT2[-1:]],axis=0)
-        Dinvzmagi = tf.reshape(Dinvzmag,[-1,1])
-        Dinvzmaginull = tf.equal(Dinvzmagi,0.)
-        Dinvzmagiinf = tf.is_inf(Dinvzmagi)
+        ydnull = tf.equal(ydi,0.)
+        ydinf = tf.is_inf(ydi)
         UT2false = tf.zeros_like(UT2,dtype=tf.bool)
-        Dinvznullm = tf.logical_or(UT2false,Dinvzmaginull)
-        Dinvzinfm = tf.logical_or(UT2false,Dinvzmagiinf)
-        UT2out = tf.where(Dinvznullm,UT2,UT2out)
-        UT2out = tf.where(Dinvzinfm,UT21,UT2out)
+        ydnullm = tf.logical_or(UT2false,ydnull)
+        ydinfm = tf.logical_or(UT2false,ydinf)
+        UT2out = tf.where(ydnullm,UT21,UT2out)
+        UT2out = tf.where(ydinfm,UT2,UT2out)        
                         
         #now put everything back together
         #eigenvalues are still guaranteed to be sorted
@@ -425,17 +431,9 @@ class SR1TrustExact:
       abarindices = tf.where(uniqueasq)
       abarsq = tf.gather_nd(uniqueasq,abarindices)
       lambar = tf.gather_nd(uniquelam,abarindices)
-
-      #abarsq = tf.reshape(abarsq,[-1])
-      #lambar = tf.reshape(lambar, [-1])
       
       abar = tf.sqrt(abarsq)
-       
-      #abarsq = tf.Print(abarsq,[asq],message="asq",summarize=1000) 
-      #abarsq = tf.Print(abarsq,[lam],message="lam",summarize=1000) 
-      #abarsq = tf.Print(abarsq,[abarsq],message="abarsq",summarize=1000)
-      #abarsq = tf.Print(abarsq,[lambar],message="lambar",summarize=1000)
-       
+      
       e0 = lam[0]
       sigma0 = tf.maximum(-e0,tf.zeros([],dtype=var.dtype))
       
