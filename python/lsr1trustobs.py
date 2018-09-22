@@ -200,14 +200,16 @@ class SR1TrustExact:
         e1 = d[1:]
         delta = (e1 - en1)/rho
         rdeltan1 = rho/(e1-en1)
-        rdelta2n1 = tf.square(rdeltan1)
-        rdeltan = tf.reciprocal(rho)
-        rdelta = tf.concat([rdeltan1,tf.reshape(rdeltan,[-1])],axis=0)
+        #rdelta2n1 = tf.square(rdeltan1)
+        #rdeltan = tf.reciprocal(rho)
+        rdelta = tf.concat([rdeltan1,[1.]],axis=0)
+        rdelta2 = tf.square(rdelta)
         #rdelta = tf.Print(rdelta,[delta],message="delta",summarize=100000)
         #rdelta = tf.Print(rdelta,[rdelta],message="rdelta",summarize=100000)
         xisqn1 = tf.reshape(xisq[:-1],[-1])
-        xisq1 = tf.reshape(xisq[1:],[-1])
-        xisqn = tf.reshape(xisq[-1],[])
+        xisq1n1 = tf.reshape(xisq[1:],[-1])
+        xisq1 = tf.concat([xisq1n1, [0.]],axis=0)
+        #xisqn = tf.reshape(xisq[-1],[])
         
         di = tf.reshape(d,[-1,1])
         dj = tf.reshape(d,[1,-1])
@@ -227,7 +229,12 @@ class SR1TrustExact:
         
         def body(yd,unconverged,j):
           syd = yd + rdelta
-          frden = tf.reciprocal(deltam*tf.reshape(syd,[-1,1]) - 1.)
+          rsyd = tf.reciprocal(syd)
+          rsyd2 = tf.square(rsyd)
+          rsyd3 = rsyd2*rsyd
+          
+          frden = tf.reciprocal(deltam-tf.reshape(rsyd,[-1,1]))
+          frden = tf.matrix_set_diag(frden,-syd)
           #exclude j=i and j=i+1 terms
           frden = tf.where(deltamask,tf.zeros_like(frden),frden)
           xisqj = tf.reshape(xisq,[1,-1])
@@ -237,68 +244,49 @@ class SR1TrustExact:
           
           s0 = tf.reduce_sum(s0arg, axis=-1)
           s1 = tf.reduce_sum(s1arg, axis=-1)
+          s2 = tf.reduce_sum(s2arg, axis=-1)
           
           syd = yd + rdelta
           
-          ydn1 = yd[:-1]
-          yd2n1 = tf.square(ydn1)
-          yd3n1 = yd2n1*ydn1
-          sydn1 = syd[:-1]
+          yd2 = tf.square(yd)
+          yd3 = yd2*yd
+                              
+          #fn1 = 1. + sydn1*s0n1 + sydn1*xisq1*rdeltan1/ydn1
+          #fn = 1. + sydn*s0n
+          #fn = tf.reshape(fn,[-1])
+          #f = tf.concat([fn1,fn],axis=0)
           
-          s0n1 = s0[:-1]
-          s1n1 = s1[:-1]
-          s2n1 = tf.reduce_sum(s2arg[:-1], axis=-1)
+          #phi = yd + yd*syd*s0 + syd*xisq1*rdelta
+          phi = yd + yd*s0 + syd*xisq1*rdelta
           
-          ydn = yd[-1]
-          sydn = syd[-1]
-          
-          s0n = s0[-1]
-          s1n = s1[-1]
-                    
-                    
-          fn1 = 1. + sydn1*s0n1 + sydn1*xisq1*rdeltan1/ydn1
-          fn = 1. + sydn*s0n
-          fn = tf.reshape(fn,[-1])
-          f = tf.concat([fn1,fn],axis=0)
-          
-          magw = tf.sqrt(tf.reduce_sum(tf.square(f)))
+          magw = tf.sqrt(tf.reduce_sum(tf.square(phi)))
           
           
-          rn1 = yd3n1*s2n1 + xisq1*rdelta2n1
-          qn1 = ydn1*s2n1 - s1n1
-          pn1 = 1. + sydn1*s0n1 + ydn1*s1n1 - 2.*yd2n1*s2n1 + xisq1*rdeltan1
+          #r = yd3*s2 + xisq1*rdelta2
+          #q = yd*s2 - s1
+          #p = 1. + syd*s0 + yd*s1 - 2.*yd2*s2 + xisq1*rdelta
+
+          r = yd3*rsyd3*s2 + xisq1*rdelta2
+          q = -rsyd2*s1 + yd*rsyd3*s2 
+          p = 1. + s0 + yd*rsyd2*s1 - 2.*yd2*rsyd3*s2 + xisq1*rdelta
           
-          an1 = qn1
-          bn1 = pn1
-          cn1 = rn1
+          a = q
+          b = p
+          c = r
           
-          sqrtarg = tf.square(bn1) - 4.*an1*cn1
-          ydn1 = 0.5*(-bn1 - tf.sqrt(tf.square(bn1) - 4.*an1*cn1))/an1
-          #ydn1 = tf.Print(ydn1,[sqrtarg],message="sqrtarg",summarize=10000)
-          
-          qn = -s1n
-          pn = 1. + sydn*s0n + ydn*s1n
-          ydn = -pn/qn
-          ydn = tf.reshape(ydn,[-1])
-                    
           ydold = yd
-          yd = tf.concat([ydn1,ydn],axis=0)
-          #ensure yd is in the range [0,infinity]
-          yd = tf.maximum(yd,tf.zeros_like(yd))
-          #special case for delta=0 (shouldn't be needed due to deflation)
-          #yd = tf.where(tf.is_inf(rdelta),tf.zeros_like(yd),yd)
           
-          #t = tf.Print(t,[delta],message="delta",summarize=10000)
-          #t = tf.Print(t,[frden],message="frden",summarize=10000)
-          ##t = tf.Print(t,[f],message="f",summarize=10000)
-          ##t = tf.Print(t,[fp],message="fp",summarize=10000)
-          ##t = tf.Print(t,[fpp],message="fpp",summarize=10000)
-          #t = tf.Print(t,[cn1],message="cn1",summarize=10000)
-          #t = tf.Print(t,[bn1],message="bn1",summarize=10000)
-          #t = tf.Print(t,[an1],message="an1",summarize=10000)
-          #t = tf.Print(t,[sqrtarg],message="sqrtarg",summarize=10000)
+          #use two different forms of the quadratic formula depending on the sign of b
+          #in order to avoid cancellations/roundoff
+          sarg = tf.square(b) - 4.*a*c
+          #sarg = tf.maximum(sarg,0.)
+          s = tf.sqrt(sarg)
+          ydnom = -0.5*(b+s)/a
+          ydalt = -2.*c/(b-s)
+          
+          yd = tf.where(b>=0, ydnom, ydalt)
+          
           #yd = tf.Print(yd,[yd],message="yd",summarize=10000)
-          #t = tf.Print(t,[t],message="t",summarize=10000)
                     
           #when individual eigenvalues have converged we mark them as such
           #but simply keep iterating on the full vector, since any efficiency
@@ -308,6 +296,20 @@ class SR1TrustExact:
           unconverged = unconverged & yadvancing
                                  
 
+          lidxs = tf.where(tf.abs(phi)>0.01)
+          phil = tf.gather_nd(phi,lidxs)
+          al = tf.gather_nd(a,lidxs)
+          bl = tf.gather_nd(b,lidxs)
+          cl = tf.gather_nd(c,lidxs)
+          ydl = tf.gather_nd(yd,lidxs)
+
+          doprint = tf.logical_not(tf.reduce_any(unconverged)) & (tf.shape(lidxs)[0]>0)
+
+          yd = tf.cond(doprint, lambda: tf.Print(yd,[phil],message="phil",summarize=10000), lambda: tf.identity(yd))
+          yd = tf.cond(doprint, lambda: tf.Print(yd,[al],message="al",summarize=10000), lambda: tf.identity(yd))
+          yd = tf.cond(doprint, lambda: tf.Print(yd,[bl],message="bl",summarize=10000), lambda: tf.identity(yd))
+          yd = tf.cond(doprint, lambda: tf.Print(yd,[cl],message="cl",summarize=10000), lambda: tf.identity(yd))
+          yd = tf.cond(doprint, lambda: tf.Print(yd,[ydl],message="ydl",summarize=10000), lambda: tf.identity(yd))
 
           #t = tf.Print(t,[psi],message="psi",summarize=10000)
           #t = tf.Print(t,[phi],message="phi",summarize=10000)
@@ -325,12 +327,17 @@ class SR1TrustExact:
           
           
         yd,unconverged,j = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
-        yd0idxs = tf.where(tf.equal(yd,0.))
-        xisqi = tf.gather_nd(xisq,yd0idxs)
-        xisqi1 = tf.gather_nd(xisq,yd0idxs+1)
+        
+        ydassert = tf.Assert(tf.reduce_all(yd>0.),[yd],summarize=10000)        
+        with tf.control_dependencies([ydassert]):
+          yd = tf.identity(yd)
+        
+        #yd0idxs = tf.where(tf.equal(yd,0.))
+        #xisqi = tf.gather_nd(xisq,yd0idxs)
+        #xisqi1 = tf.gather_nd(xisq,yd0idxs+1)
         #yd = tf.Print(yd,[yd],message="yd",summarize=10000)
-        yd = tf.Print(yd,[xisqi],message="xisqi",summarize=10000)
-        yd = tf.Print(yd,[xisqi1],message="xisqi1",summarize=10000)
+        #yd = tf.Print(yd,[xisqi],message="xisqi",summarize=10000)
+        #yd = tf.Print(yd,[xisqi1],message="xisqi1",summarize=10000)
         syd = yd + rdelta
         t = tf.reciprocal(syd)
         deltae2 = rho*t
