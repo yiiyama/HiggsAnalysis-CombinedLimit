@@ -17,7 +17,7 @@ import h5py
 import h5py_cache
 from HiggsAnalysis.CombinedLimit.tfh5pyutils import maketensor,makesparsetensor
 from HiggsAnalysis.CombinedLimit.tfsparseutils import simple_sparse_tensor_dense_matmul, simple_sparse_slice0begin, simple_sparse_to_dense, SimpleSparseTensor
-from HiggsAnalysis.CombinedLimit.lsr1trustobs import LSR1TrustOBS,SR1TrustOBS,SR1TrustExact
+from HiggsAnalysis.CombinedLimit.lsr1trustobs import SR1TrustExact
 import scipy
 import math
 import time
@@ -30,7 +30,7 @@ ROOT.gROOT.SetBatch(True)
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 argv.remove( '-b-' )
 
-#from root_numpy import array2hist
+from root_numpy import array2hist
 
 from array import array
 
@@ -154,22 +154,13 @@ else:
   
 x = tf.Variable(xdefault, name="x")
 
-xscale = tf.Variable(tf.ones_like(x),trainable=False)
-xoffset = tf.Variable(tf.zeros_like(x),trainable=False)
-
-#xscaled = xscale*x + xoffset
-
-xscaled = x
-
-xscaledpoi = xscaled[:npoi]
 xpoi = x[:npoi]
-theta = xscaled[npoi:]
-xtheta = x[npoi:]
+theta = x[npoi:]
 
 if boundmode == 0:
-  poi = xscaledpoi
+  poi = xpoi
 elif boundmode == 1:
-  poi = tf.square(xscaledpoi)
+  poi = tf.square(xpoi)
 
 #vector encoding effect of signal strengths
 if options.POIMode == "mu":
@@ -289,14 +280,12 @@ if nbinsmasked>0:
   outputs.append(pmaskedexpnorm)
 
 grad = tf.gradients(l,x,gate_gradients=True)[0]
-hessian = jacobian(grad,x,gate_gradients=True,parallel_iterations=32,back_prop=True)
-hessrow0 = tf.gradients(grad[0],x,gate_gradients=True)[0]
+hessian = jacobian(grad,x,gate_gradients=True,parallel_iterations=1,back_prop=False)
 
 eigvals = tf.self_adjoint_eigvals(hessian)
 mineigv = tf.reduce_min(eigvals)
 isposdef = mineigv > 0.
 invhessian = tf.matrix_inverse(hessian)
-errors = tf.sqrt(tf.diag_part(invhessian))
 gradcol = tf.reshape(grad,[-1,1])
 edm = 0.5*tf.matmul(tf.matmul(gradcol,invhessian,transpose_a=True),gradcol)
 
@@ -318,11 +307,7 @@ ub = np.concatenate((np.inf*np.ones([npoi],dtype=dtype),np.inf*np.ones([nsyst],d
 xtol = np.finfo(dtype).eps
 edmtol = math.sqrt(xtol)
 btol = 1e-8
-minimizer = ScipyTROptimizerInterface(l, var_list = [x], var_to_bounds={x: (lb,ub)}, options={'verbose': options.fitverbose, 'maxiter' : 100000, 'gtol' : 0., 'xtol' : xtol, 'barrier_tol' : btol})
-#tfminimizer = LSR1TrustOBS(l,x,grad)
-#tfminimizer = SR1TrustOBS(l,x,grad)
 tfminimizer = SR1TrustExact(l,x,grad)
-#opinit = tfminimizer.initialize(l,x,grad)
 opinit = tfminimizer.initialize(l,x,grad,hessian)
 opmin = tfminimizer.minimize(l,x,grad)
 
@@ -356,7 +341,6 @@ bootstrapassign = tf.assign(nobs,tf.random_poisson(nobs,shape=[],dtype=dtype))
 toyassign = tf.assign(nobs,tf.random_poisson(nexp,shape=[],dtype=dtype))
 frequentistassign = tf.assign(theta0,theta + tf.random_normal(shape=theta.shape,dtype=dtype))
 thetastartassign = tf.assign(x, tf.concat([xpoi,theta0],axis=0))
-#thetastartassign = tf.assign(x, tf.concat([xpoi,(theta0 - xoffset[npoi:]/xscale[npoi:])],axis=0))
 bayesassign = tf.assign(x, tf.concat([xpoi,theta+tf.random_normal(shape=theta.shape,dtype=dtype)],axis=0))
 
 #initialize output tree
@@ -481,10 +465,6 @@ if options.nThreads>0:
 else:
   config = None
 
-#config = tf.ConfigProto(
-        #device_count = {'GPU': 0}
-    #)
-
 sess = tf.Session(config=config)
 
 #note that initializing all variables also triggers reading the hdf5 arrays from disk and populating the caches
@@ -493,36 +473,32 @@ sess.run(globalinit)
 for cacheinit in tf.get_collection("cache_initializers"):
   sess.run(cacheinit)
 
-outvalsgens,thetavalsgen = sess.run([outputs,theta])
-
-#all caches should be filled by now
-
-#set offset and scaling
-sess.run(asimovassign)
-sess.run(thetastartassign)
-sess.run(nexpnomassign)
-#offsetv, scalev = sess.run([x,errors])
-#xv = np.zeros_like(offsetv)
-#xoffset.load(offsetv, sess)
-#xscale.load(scalev, sess)
-#x.load(xv,sess)
 xv = sess.run(x)
-
-
-#print(offsetv)
-
-
-#print(sess.run([x,r,theta]))
-
-#exit()
 
 #set likelihood offset
 sess.run(nexpnomassign)
 
+outvalsgens,thetavalsgen = sess.run([outputs,theta])
+
+#all caches should be filled by now
+
+def minimize():
+  sess.run(opinit)
+  ifit = 0
+  while True:
+    isconverged,_ = sess.run(opmin)
+    if options.fitverbose > 2:
+      lval, gmagval, e0val, trval = sess.run([tfminimizer.loss_old, tfminimizer.grad_old_mag, tfminimizer.e0, tfminimizer.trustradius])
+      print('Iteration %d, loss = %.6f, |g| = %e, lowest eigenvalue = %e, trustradius = %e' % (ifit,lval,gmagval,e0val,trval))
+    if isconverged:
+      break
+    
+    ifit += 1
+
 #prefit to data if needed
 if options.toys>0 and options.toysFrequentist and not options.bypassFrequentistFit:  
   sess.run(nexpnomassign)
-  ret = minimizer.minimize(sess)
+  minimize()
   xv = sess.run(x)
 
 for itoy in range(ntoys):
@@ -531,8 +507,6 @@ for itoy in range(ntoys):
   #reset all variables
   sess.run(globalinit)
   x.load(xv,sess)
-  #xoffset.load(offsetv, sess)
-  #xscale.load(scalev, sess)
     
   dofit = True
   
@@ -590,119 +564,14 @@ for itoy in range(ntoys):
     neval = 1
     t0 = time.time()
     for i in range(neval):
-      print(i)
       hessval = sess.run([hessian])
     t = time.time() - t0
     print("%d hessian evals in %f seconds, %f seconds per eval" % (neval,t,t/max(1,neval)))
     
     exit()
   
-  #dofit = False
   if dofit:
-    #ret = minimizer.minimize(sess)
-    ifit = 0
-    sess.run(opinit)
-    
-    #B=tf.Variable(tf.zeros_like(hessian))
-    #Bmod=tf.Variable(tf.zeros_like(hessian))
-    
-    #B.load(sess.run(hessian),sess)
-    
-    ##B = tf.constant(sess.run(invhessian))
-        
-        
-    #e,u = tf.self_adjoint_eig(B)
-    #ea = tf.self_adjoint_eigvals(B)    
-    
-    #Bmod.load(sess.run(B - 4.*e[0]*tf.eye(int(x.shape[0]),dtype=dtype)),sess)
-    ##Bmod = tf.constant(sess.run(B - 4.*e[0]*tf.eye(int(x.shape[0]),dtype=dtype)))
-    #chol = tf.cholesky(Bmod)
-    #matmulv = tf.matmul(B,tf.reshape(tfminimizer.grad_old,[-1,1]))
-    #matmul = tf.matmul(B,B)
-    #matsolve = tf.matrix_solve(B,tf.reshape(tfminimizer.grad_old,[-1,1]))
-    #onev = tf.ones(x.shape,dtype=x.dtype)/math.sqrt(int(x.shape[0]))
-    #hessv = tf.gradients(grad*tf.stop_gradient(onev),x,gate_gradients=True)
-    
-    #sess.run([e,u])
-    #t0 = time.time()
-    #neval = 10
-    #for i in range(neval):
-      #print(i)
-      #sess.run([e,u])
-    #t = time.time()-t0
-    #t /= neval
-    #print("eig time = %f" % t)
-    
-    #print(B.shape)
-    #print(sess.run(e))
-    #print(sess.run(ea))
-    
-    #t0 = time.time()
-    #neval = 20
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(ea)
-    #t = time.time()-t0
-    #t /= neval
-    #print("eigval time = %f" % t)
-    
-    #t0 = time.time()
-    #neval = 100
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(chol)
-    #t = time.time()-t0
-    #t /= neval
-    #print("chol time = %f" % t)
-
-    #t0 = time.time()
-    #neval = 200
-    #for i in range(neval):
-      #print(i)
-      #sess.run(matmulv)
-    #t = time.time()-t0
-    #t /= neval
-    #print("matmulv time = %f" % t)
-
-    
-    #t0 = time.time()
-    #neval = 50
-    #for i in range(neval):
-      #print(i)
-      #sess.run(matmul)
-    #t = time.time()-t0
-    #t /= neval
-    #print("matmul time = %f" % t)
-
-    #t0 = time.time()
-    #neval = 1000
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(matsolve)
-    #t = time.time()-t0
-    #t /= neval
-    #print("matsolve time = %f" % t)
-    
-    #t0 = time.time()
-    #neval = 100
-    #for i in range(neval):
-      ##print(i)
-      #sess.run(hessv)
-    #t = time.time()-t0
-    #t /= neval
-    #print("hessv time = %f" % t)
- 
-    #exit()
- 
-    while True:
-      isconverged,_ = sess.run(opmin)
-      lval = sess.run(l)
-      print([ifit,lval])
-      
-      if isconverged:
-        break
-      
-      ifit += 1
+    minimize()
 
   #get fit output
   xval, outvalss, thetavals, theta0vals, nllval, nllvalfull = sess.run([x,outputs,theta,theta0,l,lfull])
@@ -726,7 +595,7 @@ for itoy in range(ntoys):
   print("status = %i, errstatus = %i, nllval = %f, nllvalfull = %f, edmval = %e, mineigval = %e" % (status,errstatus,nllval,nllvalfull,edmval,mineigval))  
   
   if errstatus==0:
-    fullsigmasv = np.sqrt(np.diag(invhessoutvals[0]))
+    fullsigmasv = np.sqrt(np.diag(invhessval))
     thetasigmasv = fullsigmasv[npoi:]
   else:
     thetasigmasv = -99.*np.ones_like(thetavals)
@@ -762,8 +631,8 @@ for itoy in range(ntoys):
       if not options.toys > 0:
         variances2D     = parameterErrors[np.newaxis].T * parameterErrors
         correlationMatrix = np.divide(invhessoutval, variances2D)
-        #array2hist(correlationMatrix, correlationHist)
-        #array2hist(invhessoutval, covarianceHist)
+        array2hist(correlationMatrix, correlationHist)
+        array2hist(invhessoutval, covarianceHist)
     else:
       sigmasv = -99.*np.ones_like(outvals)
     

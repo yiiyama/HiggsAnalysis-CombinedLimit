@@ -13,9 +13,11 @@ class SR1TrustExact:
     self.atboundary_old = tf.Variable(False, trainable=False)
     self.doiter_old = tf.Variable(False, trainable = False)
     self.grad_old = tf.Variable(tf.zeros_like(var), trainable=False)
+    self.grad_old_mag = tf.sqrt(tf.reduce_sum(tf.square(self.grad_old)))
     self.isfirstiter = tf.Variable(True, trainable=False)
     self.UT = tf.Variable(tf.eye(int(var.shape[0]),dtype=var.dtype),trainable=False)
     self.e = tf.Variable(tf.ones_like(var),trainable=False)
+    self.e0 = self.e[0]
     self.doscaling = tf.Variable(False)
     
   def initialize(self, loss, var, grad, B = None):
@@ -68,7 +70,7 @@ class SR1TrustExact:
     trustradius_out = tf.where(self.doiter_old, trustradius_out, self.trustradius)
 
     
-    trustradius_out = tf.Print(trustradius_out, [actual_reduction,self.predicted_reduction,rho, trustradius_out], message = "actual_reduction, self.predicted_reduction, rho, trustradius_out: ")
+    #trustradius_out = tf.Print(trustradius_out, [actual_reduction,self.predicted_reduction,rho, trustradius_out], message = "actual_reduction, self.predicted_reduction, rho, trustradius_out: ")
     
     def doSR1Scaling(Bin,yin,dxin):
       s_norm2 = tf.reduce_sum(tf.square(dxin))
@@ -112,7 +114,7 @@ class SR1TrustExact:
         z = dyBx/dyBxnorm
         signedrho = dyBxnormsq/den
         signedrho = tf.reshape(signedrho,[])
-        signedrho = tf.Print(signedrho,[signedrho],message="signedrho")
+        #signedrho = tf.Print(signedrho,[signedrho],message="signedrho")
         rho = tf.abs(signedrho)
 
         flipsign = signedrho < 0.
@@ -419,7 +421,7 @@ class SR1TrustExact:
         magphi = tf.reduce_sum(tf.square(phiout))
         
 
-        dout = tf.Print(dout,[magphi],message="magphi")
+        #dout = tf.Print(dout,[magphi],message="magphi")
         
         #now compute eigenvectors, with rows of this matrix constructed
         #from the solution with the higher numerical precision
@@ -563,7 +565,7 @@ class SR1TrustExact:
           return (sigmaout,phiout,phiprimeout,unconverged,j+1)
           
         sigmaiter, phiiter,phiprimeiter,unconverged,jiter = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
-        sigmaiter = tf.Print(sigmaiter,[phiiter],message="phiiter")
+        #sigmaiter = tf.Print(sigmaiter,[phiiter],message="phiiter")
         return sigmaiter
       
       #sigma=0 corresponds to the unconstrained solution on the interior of the trust region
@@ -581,14 +583,14 @@ class SR1TrustExact:
       pmag = tf.sqrt(tf.reduce_sum(tf.square(p)))
       #the equivalence of |p| and |coeffs| is a partial test of the orthonormality of the eigenvectors
       #which could be degraded in case of excessive loss of numerical precision
-      p = tf.Print(p,[pmag,coeffsmag,sigma],message="pmag,coeffsmag,sigma")
+      #p = tf.Print(p,[pmag,coeffsmag,sigma],message="pmag,coeffsmag,sigma")
 
       #predicted reduction also computed directly from eigenvalues and eigenvectors
       predicted_reduction_out = -(tf.reduce_sum(a*coeffs) + 0.5*tf.reduce_sum(lam*tf.square(coeffs)))
       
       return [var+p, predicted_reduction_out, tf.logical_not(usesolu), grad]
 
-    doiter = tf.Print(doiter,[doiter],message="doiter")
+    #doiter = tf.Print(doiter,[doiter],message="doiter")
     loopout = tf.cond(doiter, lambda: build_sol(), lambda: [self.var_old+0., tf.zeros_like(loss),tf.constant(False),self.grad_old])
     var_out, predicted_reduction_out, atboundary_out, grad_out = loopout
     
