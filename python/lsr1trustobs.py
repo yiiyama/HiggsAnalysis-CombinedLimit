@@ -315,7 +315,7 @@ class SR1TrustExact:
           tunsaturated = t < 0.6*delta
           unconverged = unconverged & tadvancing & tunsaturated
                                  
-          t = tf.Print(t,[magw],message="magw")
+          #t = tf.Print(t,[magw],message="magw")
           
           return (t,unconverged,j+1,phi)
           
@@ -399,7 +399,7 @@ class SR1TrustExact:
           #tunsaturated = tadvancing
           unconverged = unconverged & tadvancing & tunsaturated
 
-          t = tf.Print(t,[magw],message="magw2")
+          #t = tf.Print(t,[magw],message="magw2")
           
           return (t,unconverged,j+1,phi)
         
@@ -559,10 +559,11 @@ class SR1TrustExact:
           sigmaout = sigma - phi/phiprime
           phiout, phiprimeout = phiphiprime(sigmaout)
           unconverged = (phiout > phi) & (phiout < 0.)
-          phiout = tf.Print(phiout,[phiout],message="phiout")
+          #phiout = tf.Print(phiout,[phiout],message="phiout")
           return (sigmaout,phiout,phiprimeout,unconverged,j+1)
           
-        sigmaiter, phiiter,phiprimeiter,unconverged,jiter = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)        
+        sigmaiter, phiiter,phiprimeiter,unconverged,jiter = tf.while_loop(cond, body, loop_vars, parallel_iterations=1, back_prop=False)
+        sigmaiter = tf.Print(sigmaiter,[phiiter],message="phiiter")
         return sigmaiter
       
       #sigma=0 corresponds to the unconstrained solution on the interior of the trust region
