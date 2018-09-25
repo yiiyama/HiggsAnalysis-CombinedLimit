@@ -2,6 +2,7 @@
 import re
 from sys import argv, stdout, stderr, exit, modules
 from optparse import OptionParser
+import multiprocessing
 
 import tensorflow as tf
 
@@ -279,8 +280,13 @@ if nbinsmasked>0:
   outputs.append(pmaskedexp)
   outputs.append(pmaskedexpnorm)
 
-grad = tf.gradients(l,x,gate_gradients=True)[0]
-hessian = jacobian(grad,x,gate_gradients=True,parallel_iterations=1,back_prop=False)
+nthreadshess = options.nThreads
+if nthreadshess<0:
+  nthreadshess = multiprocessing.cpu_count()
+nthreadshess = min(nthreadshess,nparms)
+
+grad = tf.gradients(l,x,gate_gradients=True)[0]  
+hessian = jacobian(grad,x,gate_gradients=True,parallel_iterations=nthreadshess,back_prop=False)
 
 eigvals = tf.self_adjoint_eigvals(hessian)
 mineigv = tf.reduce_min(eigvals)
@@ -291,7 +297,7 @@ edm = 0.5*tf.matmul(tf.matmul(gradcol,invhessian,transpose_a=True),gradcol)
 
 invhessianouts = []
 for output in outputs:
-  jacout = jacobian(tf.concat([output,theta],axis=0),x,gate_gradients=True,parallel_iterations=1,back_prop=False)
+  jacout = jacobian(tf.concat([output,theta],axis=0),x,gate_gradients=True,parallel_iterations=nthreadshess,back_prop=False)
   invhessianout = tf.matmul(jacout,tf.matmul(invhessian,jacout,transpose_b=True))
   invhessianouts.append(invhessianout)
 
