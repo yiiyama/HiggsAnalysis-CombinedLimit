@@ -518,10 +518,7 @@ def minimize():
 def fillHists(tag):
   hists = []
 
-  dataobsval, normfullval, nexpfullval, nexpsigval, nexpbkgval = sess.run([data_obs,normfull,nexpfull,nexpsig,nexpbkg])
-  dataobsHist = ROOT.TH1D('dataobs_' + tag,'',nbins,-0.5, float(nbins)-0.5)
-  hists.append(dataobsHist)
-  array2hist(dataobsval, dataobsHist)
+  normfullval, nexpfullval, nexpsigval, nexpbkgval = sess.run([normfull,nexpfull,nexpsig,nexpbkg])
   
   expfullHist = ROOT.TH1D('expfull_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
   hists.append(expfullHist)
@@ -618,6 +615,10 @@ for itoy in range(ntoys):
     exit()
   
   if options.saveHists and not options.toys > 1:
+    nobsval = sess.run(nobs)
+    obsHist = ROOT.TH1D('obs','',nbins,-0.5, float(nbins)-0.5)
+    array2hist(nobsval, obsHist)
+    
     prefithists = fillHists('prefit')
   
   if dofit:
