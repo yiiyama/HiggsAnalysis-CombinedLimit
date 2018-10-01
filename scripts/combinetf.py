@@ -321,6 +321,52 @@ a = tf.Variable(np.zeros([],dtype=dtype),trainable=False)
 errdir = tf.Variable(np.zeros(x.shape,dtype=dtype),trainable=False)
 dlconstraint = l - l0
 
+def experr(expected, invhess):
+  #compute uncertainty on expectation propagating through uncertainty on fit parameters using full covariance matrix
+  
+  flatexp = tf.reshape(expected,[-1])
+  expsize = tf.shape(flatexp)[0]
+  
+  arr = tf.TensorArray(expected.dtype,size=expsize,infer_shape=True,element_shape=[])
+  loop_vars = [arr, tf.constant(0)]
+  def cond(arr,j):
+    return (j < expsize)
+  
+  def body(arr,j):
+    j = tf.Print(j,[j])
+    #compute the jacobian
+    expgrad = tf.gradients(flatexp[j],x,gate_gradients=True)[0]
+    expgradcol = tf.reshape(expgrad,[-1,1])
+    #this is equivalent to jac cov jac^T
+    #err = tf.sqrt(tf.reduce_sum(expgradcol*tf.matmul(invhess,expgradcol)))
+    err = tf.sqrt(tf.reduce_sum(tf.square(expgradcol)))
+    arr = arr.write(j,err)
+    return (arr,j+1)
+  
+  arr,j = tf.while_loop(cond,body,loop_vars, parallel_iterations=64, back_prop=False)
+  errv = arr.stack()
+  errm = tf.reshape(errv,expected.shape)
+  return errm
+  
+if options.saveHists:
+  #for prefit uncertainties assume zero uncertainty on pois since this is not well defined
+  #and uncorrelated unit uncertainties on nuisances parameters
+  invhessianprefit = tf.diag(tf.concat([tf.zeros_like(xpoi),tf.ones_like(theta)],axis=0))
+  
+  #compute uncertainties for expectations (prefit)
+  normfullerrpre = experr(normfull,invhessianprefit)
+  nexpfullerrpre = experr(nexpfull,invhessianprefit)
+  nexpsigerrpre = experr(nexpsig, invhessianprefit)
+  nexpbkgerrpre = experr(nexpbkg, invhessianprefit)
+  
+  #compute uncertainties for expectations (postfit, using the full covariance matrix)
+  normfullerr = experr(normfull,invhessian)
+  nexpfullerr = experr(nexpfull,invhessian)
+  nexpsigerr = experr(nexpsig, invhessian)
+  nexpbkgerr = experr(nexpbkg, invhessian)
+  
+  
+
 lb = np.concatenate((-np.inf*np.ones([npoi],dtype=dtype),-np.inf*np.ones([nsyst],dtype=dtype)),axis=0)
 ub = np.concatenate((np.inf*np.ones([npoi],dtype=dtype),np.inf*np.ones([nsyst],dtype=dtype)),axis=0)
 
@@ -516,27 +562,33 @@ def minimize():
     ifit += 1
 
 def fillHists(tag):
+  print("filling hists")
   hists = []
-
-  normfullval, nexpfullval, nexpsigval, nexpbkgval = sess.run([normfull,nexpfull,nexpsig,nexpbkg])
+  
+  if tag=='prefit':
+    normfullval, nexpfullval, nexpsigval, nexpbkgval, normfullerrval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,normfullerrpre,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre])
+  else:
+    normfullval, nexpfullval, nexpsigval, nexpbkgval, normfullerrval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,normfullerr,nexpfullerr,nexpsigerr,nexpbkgerr])
   
   expfullHist = ROOT.TH1D('expfull_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
   hists.append(expfullHist)
-  array2hist(nexpfullval,expfullHist)
+  array2hist(nexpfullval,expfullHist, errors=nexpfullerrval)
   
   expsigHist = ROOT.TH1D('expsig_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
   hists.append(expsigHist)
-  array2hist(nexpsigval,expsigHist)
+  array2hist(nexpsigval,expsigHist, errors=nexpsigerrval)
   
   expbkgHist = ROOT.TH1D('expbkg_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
   hists.append(expbkgHist)
-  array2hist(nexpbkgval,expbkgHist)
+  array2hist(nexpbkgval,expbkgHist,errors=nexpbkgerrval)
   
   for iproc,proc in enumerate(procs):
     expHist = ROOT.TH1D('expproc_%s_%s' % (proc,tag),'',nbinsfull,-0.5, float(nbinsfull)-0.5)
     hists.append(expHist)
-    array2hist(normfullval[:,iproc], expHist)
-      
+    array2hist(normfullval[:,iproc], expHist, errors=normfullerrval[:,iproc])
+  
+  print("done filling hists")
+  
   return hists
 
 #prefit to data if needed
