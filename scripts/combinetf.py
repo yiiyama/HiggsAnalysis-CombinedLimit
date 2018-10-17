@@ -56,7 +56,8 @@ parser.add_option("","--POIMode", default="mu",type="string", help="mode for POI
 parser.add_option("","--nonNegativePOI", default=True, action='store_true', help="force signal strengths to be non-negative")
 parser.add_option("","--POIDefault", default=1., type=float, help="mode for POI's")
 parser.add_option("","--doBenchmark", default=False, action='store_true', help="run benchmarks")
-parser.add_option("","--saveHists", default=False, action='store_true', help="run benchmarks")
+parser.add_option("","--saveHists", default=False, action='store_true', help="save prefit and postfit histograms")
+parser.add_option("","--computeHistErrors", default=False, action='store_true', help="propagate uncertainties to prefit and postfit histograms")
 (options, args) = parser.parse_args()
 
 if len(args) == 0:
@@ -574,14 +575,20 @@ def minimize():
     
     ifit += 1
 
-def fillHists(tag):
+def fillHists(tag, witherrors=options.computeHistErrors):
   print("filling hists")
   hists = []
   
   if tag=='prefit':
-    normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre,normfullerrpre])
+    if witherrors:
+      normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre,normfullerrpre])
+    else:
+      normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg]) + [None,None,None,None]
   else:
-    normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr,normfullerr])
+    if witherrors:
+      normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr,normfullerr])
+    else:
+      normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg]) + [None,None,None,None]
 
   expfullHist = ROOT.TH1D('expfull_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
   hists.append(expfullHist)
@@ -598,7 +605,11 @@ def fillHists(tag):
   for iproc,proc in enumerate(procs):
     expHist = ROOT.TH1D('expproc_%s_%s' % (proc,tag),'',nbinsfull,-0.5, float(nbinsfull)-0.5)
     hists.append(expHist)
-    array2hist(normfullval[:,iproc], expHist,errors=normfullerrval[:,iproc])
+    normprocval = normfullval[:,iproc]
+    normprocerrval = None
+    if witherrors:
+      normprocerrval = normfullerrval[:,iproc]
+    array2hist(normprocval, expHist,errors=normprocerrval)
   
   print("done filling hists")
   
