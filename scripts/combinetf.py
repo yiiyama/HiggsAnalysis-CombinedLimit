@@ -161,8 +161,10 @@ theta = x[npoi:]
 
 if boundmode == 0:
   poi = xpoi
+  gradr = tf.ones_like(poi)
 elif boundmode == 1:
   poi = tf.square(xpoi)
+  gradr = 2.*xpoi
 
 #vector encoding effect of signal strengths
 if options.POIMode == "mu":
@@ -171,25 +173,40 @@ elif options.POIMode == "none":
   r = tf.ones([nsignals],dtype=dtype)
 
 rnorm = tf.concat([r,tf.ones([nproc-nsignals],dtype=dtype)],axis=0)
+mrnorm = tf.expand_dims(rnorm,-1)
+ernorm = tf.reshape(rnorm,[1,-1])
 
 #interpolation for asymmetric log-normal
 twox = 2.*theta
 twox2 = twox*twox
-alpha =  0.125 * twox * (twox2 * (3*twox2 - 10.) + 15.)
+alpha =  0.125 * twox * (twox2 * (3.*twox2 - 10.) + 15.)
 alpha = tf.clip_by_value(alpha,-1.,1.)
 
 thetaalpha = theta*alpha
 
-if sparse:
-  mthetaalpha = tf.concat([theta,thetaalpha],axis=0) #now has shape [2*nsyst]
-  mthetaalpha = tf.expand_dims(mthetaalpha,-1) #now has shape [2*nsyst, 1]
-  
+mthetaalpha = tf.stack([theta,thetaalpha],axis=0) #now has shape [2,nsyst]
+mthetaalpha = tf.reshape(mthetaalpha,[2*nsyst,1])
+
+gradtheta = tf.ones_like(theta)
+#TODO implement real gradient
+gradthetaalpha = tf.zeros_like(theta)
+gradethetaalpha = tf.stack([gradtheta,gradthetaalpha],axis=0)
+gradethetaalpha = tf.reshape(gradethetaalpha,[1,1,2,nsyst])
+
+#gradmthetaalpha = tf.stack([gradtheta,gradthetaalpha],axis=0)
+#gradmthetaalpha = tf.reshape(gradmthetaalpha,[2*nsyst,1])
+
+gradrnorm = tf.concat([gradr,tf.zeros([nproc-nsignals],dtype=dtype)],axis=0)
+gradmrnorm = tf.expand_dims(gradrnorm,-1)
+gradernorm = tf.reshape(gradrnorm,[1,-1])
+
+
+if sparse:  
   logsnorm = simple_sparse_tensor_dense_matmul(logk_sparse,mthetaalpha)
   logsnorm = tf.squeeze(logsnorm,-1)
   snorm = tf.exp(logsnorm)
   
   snormnorm_sparse = SimpleSparseTensor(norm_sparse.indices, snorm*norm_sparse.values, norm_sparse.dense_shape)
-  mrnorm = tf.expand_dims(rnorm,-1)
   nexpfull = simple_sparse_tensor_dense_matmul(snormnorm_sparse,mrnorm)
   nexpfull = tf.squeeze(nexpfull,-1)
 
@@ -203,8 +220,14 @@ if sparse:
   
   #TODO consider doing this one column at a time to save memory
   if options.saveHists:
-    ernorm = tf.reshape(rnorm,[1,-1])
-    normfull = ernorm*simple_sparse_to_dense(snormnorm_sparse)
+    snormnorm = simple_sparse_to_dense(snormnorm_sparse)
+    
+    jacnexpfullr = gradernorm*snormnorm
+    jacnexpfullr = jacnexpfullr[:,:nsignals]
+    jacnexpsigr = jacnexpfullr
+    jacnexpbkgr = tf.zeros_like(jacnexpfullr)
+    
+    normfull = ernorm*snormnorm
     nexpsig = tf.reduce_sum(normfull[:,:nsignals],axis=-1)
     nexpbkg = tf.reduce_sum(normfull[:,nsignals:],axis=-1)
   
@@ -218,8 +241,6 @@ else:
   #logktheta = theta*logk
   #logsnorm = tf.reduce_sum(logktheta, axis=0)
   
-  mthetaalpha = tf.stack([theta,thetaalpha],axis=0) #now has shape [2,nsyst]
-  mthetaalpha = tf.reshape(mthetaalpha,[2*nsyst,1])
   mlogk = tf.reshape(logk,[nbinsfull*nproc,2*nsyst])
   logsnorm = tf.matmul(mlogk,mthetaalpha)
   logsnorm = tf.reshape(logsnorm,[nbinsfull,nproc])
@@ -233,20 +254,35 @@ else:
   #rnorm = tf.reshape(rnorm,[1,-1])
   #pnormfull = rnorm*snorm*norm
   #nexpfull = tf.reduce_sum(pnormfull,axis=-1)
-  snormnorm = snorm*norm
-  mrnorm = tf.reshape(rnorm,[-1,1])
-  mrnorm = tf.expand_dims(rnorm,-1)
+  snormnorm = snorm*norm  
   nexpfull = tf.matmul(snormnorm, mrnorm)
   nexpfull = tf.squeeze(nexpfull,-1)
 
   snormnormmasked = snormnorm[nbins:,:nsignals]
   
   if options.saveHists:
-    ernorm = tf.reshape(rnorm,[1,-1])
+    
+    jacnexpfullr = gradernorm*snormnorm
+    jacnexpfullr = jacnexpfullr[:,:nsignals]
+    jacnexpsigr = jacnexpfullr
+    jacnexpbkgr = tf.zeros_like(jacnexpfullr)
+    
     normfull = ernorm*snormnorm
     nexpsig = tf.reduce_sum(normfull[:,:nsignals],axis=-1)
     nexpbkg = tf.reduce_sum(normfull[:,nsignals:],axis=-1)
   
+    #TODO, re-express these as matrix multiplications and/or einsum
+    enormfull = tf.reshape(normfull,[nbinsfull,nproc,1,1])
+    jacnormfulltheta = logk*gradethetaalpha*enormfull
+    jacnexpfulltheta = tf.reduce_sum(jacnormfulltheta,axis=[1,2])
+    jacnexpsigtheta = tf.reduce_sum(jacnormfulltheta[:,:nsignals],axis=[1,2])
+    jacnexpbkgtheta = tf.reduce_sum(jacnormfulltheta[:,nsignals:],axis=[1,2])
+    
+    jacnexpfull = tf.concat([jacnexpfullr,jacnexpfulltheta],axis=-1)
+    jacnexpsig = tf.concat([jacnexpsigr,jacnexpsigtheta],axis=-1)
+    jacnexpbkg = tf.concat([jacnexpbkgr,jacnexpbkgtheta],axis=-1)
+    
+    
 pmaskedexp = r*tf.reduce_sum(snormnormmasked,axis=0)
 
 maskedexp = nexpfull[nbins:]
@@ -306,6 +342,8 @@ eigvals = tf.self_adjoint_eigvals(hessian)
 mineigv = tf.reduce_min(eigvals)
 isposdef = mineigv > 0.
 invhessian = tf.matrix_inverse(hessian)
+#invhessianchol = tf.transpose(tf.cholesky(invhessian))
+invhessianchol = tf.cholesky(invhessian)
 gradcol = tf.reshape(grad,[-1,1])
 edm = 0.5*tf.matmul(tf.matmul(gradcol,invhessian,transpose_a=True),gradcol)
 
@@ -321,7 +359,7 @@ a = tf.Variable(np.zeros([],dtype=dtype),trainable=False)
 errdir = tf.Variable(np.zeros(x.shape,dtype=dtype),trainable=False)
 dlconstraint = l - l0
 
-def experr(expected, invhess):
+def experrslow(expected, invhess):
   #compute uncertainty on expectation propagating through uncertainty on fit parameters using full covariance matrix
   
   flatexp = tf.reshape(expected,[-1])
@@ -338,14 +376,120 @@ def experr(expected, invhess):
     expgrad = tf.gradients(flatexp[j],x,gate_gradients=True)[0]
     expgradcol = tf.reshape(expgrad,[-1,1])
     #this is equivalent to jac cov jac^T
-    #err = tf.sqrt(tf.reduce_sum(expgradcol*tf.matmul(invhess,expgradcol)))
-    err = tf.sqrt(tf.reduce_sum(tf.square(expgradcol)))
+    err = tf.sqrt(tf.reduce_sum(expgradcol*tf.matmul(invhess,expgradcol,b_is_sparse=False)))
+    #err = tf.sqrt(tf.reduce_sum(tf.square(expgradcol)))
     arr = arr.write(j,err)
     return (arr,j+1)
   
   arr,j = tf.while_loop(cond,body,loop_vars, parallel_iterations=64, back_prop=False)
   errv = arr.stack()
   errm = tf.reshape(errv,expected.shape)
+  return errm
+
+def experr(expected, invhesschol):
+  #compute uncertainty on expectation propagating through uncertainty on fit parameters using full covariance matrix
+  
+  #flatexp = tf.reshape(expected,[-1])
+  #expsize = flatexp.shape[0]
+  #u = tf.ones_like(flatexp)
+  u = tf.ones_like(expected)
+  #eu = tf.exp(u)
+  
+  #v = tf.ones_like(x)
+  #ev = tf.exp(v)
+  
+  #uin = tf.ones_like(flatexp)
+  #vin = tf.ones_like(x)
+  
+  #m = tf.reshape(uin,[-1,1])*tf.reshape(vin,[1,-1])
+  #mflat = tf.reshape(m,[-1])
+  #u = tf.reduce_mean(tf.gradients(mflat,vin,gate_gradients=True)[0]
+  
+  #m = tf.ones([expsize*nparms],dtype=flatexp.dtype)
+  #s,u,v = tf.svd(tf.reshape(m,[expsize,nparms]), full_matrices=False)
+  #s0 = s[0]
+  #u = tf.sqrt(s0)*u[:,0]
+  #v = tf.sqrt(s0)*v[:,0]
+  
+  #u = tf.Print(u,[u],message="u",summarize=10000)
+  #v = tf.Print(v,[v],message="v",summarize=10000)
+  #v = tf.Print(v,[s],message="s",summarize=10000)
+
+  
+  #print("ushape = %r" % u.shape)
+  #print("vshape = %r" % v.shape)
+  
+  #dndx = tf.gradients(flatexp, x, grad_ys = u, gate_gradients=True)[0]
+  #jacv = tf.gradients(dndx, m, grad_ys = v, gate_gradients=True)[0]
+  #jac = tf.reshape(jacv,[expsize,nparms])
+  #jac = tf.Print(jac,[jac],message="jac",summarize=10000)
+  #jacprod = tf.matmul(jac,invhesschol,transpose_b=True)
+  #errv = tf.sqrt(tf.reduce_sum(tf.square(jacprod),axis=-1))
+  
+  dndx = tf.gradients(expected, x, grad_ys = u, gate_gradients=False)[0]
+  #dndx = tf.gradients(flatexp, x, grad_ys = u, gate_gradients=True)[0]
+  #dndxalt = tf.gradients(dndx, u, grad_ys = v, gate_gradients=True)[0]
+  #dndxre = tf.gradients(dndxalt, v, gate_gradients=True)[0]
+  
+  dndxv = tf.reshape(dndx,[-1,1])
+  choldndxv = tf.matmul(tf.stop_gradient(invhesschol),dndxv,transpose_a=True)
+  choldndx = tf.reshape(choldndxv,[-1])
+  #choldndx = dndx
+  
+  #errsqs = []
+  #for j in range(nparms):
+    #errsq = tf.square(tf.gradients(choldndx[j], u, gate_gradients=True)[0])
+    #errsqs.append(errsq)
+    
+  #err = tf.sqrt(tf.accumulate_n(errsqs))
+  #return err
+  
+  arr = tf.TensorArray(dtype=expected.dtype, size=nparms, element_shape=expected.shape)
+  loop_vars = [arr, tf.constant(0)]
+  #loop_vars = [tf.zeros_like(expected), tf.constant(0)]
+  def cond(errsq,j):
+    return (j < nparms)
+  
+  def body(errsq,j):
+    j = tf.Print(j,[j])
+    
+    
+    #gradsq = tf.square(tf.gradients(choldndx[j], u, gate_gradients=True)[0])
+    #gradsq = tf.gradients(choldndx[j], u, gate_gradients=True)[0]
+    gradsq = tf.gradients(tf.gather(choldndx,j), u, gate_gradients=False)[0]
+    #errsqout = errsq + gradsq
+    errsqout = errsq.write(j,gradsq)
+    
+    #errsq = errsq + tf.square(tf.gradients(choldndx[j], u, stop_gradients=x, gate_gradients=True)[0])
+    
+    #errsq = errsq + tf.square(tf.gradients(dndx,flatexp, grad_ys=invhesschol[j], gate_gradients=True)[0])
+    
+    #rjacj = tf.gradients(flatexp,x,
+    
+    #compute the jacobian
+    #expgrad = tf.gradients(flatexp[j],x,gate_gradients=True)[0]
+    #expgradcol = tf.reshape(expgrad,[-1,1])
+    ##this is equivalent to jac cov jac^T
+    #err = tf.sqrt(tf.reduce_sum(expgradcol*tf.matmul(invhess,expgradcol,b_is_sparse=False)))
+    ##err = tf.sqrt(tf.reduce_sum(tf.square(expgradcol)))
+    #arr = arr.write(j,err)
+    return (errsqout,j+1)
+  
+  errsqloop,j = tf.while_loop(cond,body,loop_vars, parallel_iterations=nthreadshess, back_prop=False)
+  
+  errsqt = tf.square(errsqloop.stack())
+  #errsql = tf.unstack(errsqt,num=nparms,axis=0)
+  #err = tf.accumulate_n(errsql)
+  #err = tf.sqrt(tf.accumulate_n(errsqloop))
+  err = tf.sqrt(tf.reduce_sum(errsqt,axis=0))
+  ##errv = arr.stack()
+  #err = tf.sqrt(errsqloop)
+  #errv = tf.sqrt(errsqloop)
+  #errm = tf.reshape(errv,expected.shape)
+  return err
+
+def experrfast(jac, invhess):
+  errm = tf.sqrt(tf.reduce_sum(tf.matmul(jac,invhess)*jac,axis=-1))
   return errm
   
 if options.saveHists:
@@ -359,11 +503,22 @@ if options.saveHists:
   nexpsigerrpre = experr(nexpsig, invhessianprefit)
   nexpbkgerrpre = experr(nexpbkg, invhessianprefit)
   
-  #compute uncertainties for expectations (postfit, using the full covariance matrix)
-  normfullerr = experr(normfull,invhessian)
-  nexpfullerr = experr(nexpfull,invhessian)
-  nexpsigerr = experr(nexpsig, invhessian)
-  nexpbkgerr = experr(nexpbkg, invhessian)
+  ##compute uncertainties for expectations (postfit, using the full covariance matrix)
+  normfullerr = experr(normfull,invhessianchol)
+  nexpfullerr = experr(nexpfull,invhessianchol)
+  nexpsigerr = experr(nexpsig, invhessianchol)
+  nexpbkgerr = experr(nexpbkg, invhessianchol)
+  
+  #nexpfullerrpre = tf.sqrt(tf.reduce_sum(tf.matmul(jacnexpfull,invhessianprefit)*jacnexpfull,axis=-1))
+  #nexpfullerr = tf.sqrt(tf.reduce_sum(tf.matmul(jacnexpfull,invhessian)*jacnexpfull,axis=-1))
+  
+  #nexpfullerrpre = experr(jacnexpfull,invhessianprefit)
+  #nexpsigerrpre = experr(jacnexpsig,invhessianprefit)
+  #nexpbkgerrpre = experr(jacnexpbkg,invhessianprefit)
+
+  #nexpfullerr = experr(jacnexpfull,invhessian)
+  #nexpsigerr = experr(jacnexpsig,invhessian)
+  #nexpbkgerr = experr(jacnexpbkg,invhessian)
   
   
 
@@ -566,9 +721,13 @@ def fillHists(tag):
   hists = []
   
   if tag=='prefit':
-    normfullval, nexpfullval, nexpsigval, nexpbkgval, normfullerrval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,normfullerrpre,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre])
+    #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre,normfullerrpre])
+    normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre])
+    #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre])
   else:
-    normfullval, nexpfullval, nexpsigval, nexpbkgval, normfullerrval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,normfullerr,nexpfullerr,nexpsigerr,nexpbkgerr])
+    #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr,normfullerr])
+    normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr])
+    #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr])
   
   expfullHist = ROOT.TH1D('expfull_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
   hists.append(expfullHist)
@@ -580,12 +739,13 @@ def fillHists(tag):
   
   expbkgHist = ROOT.TH1D('expbkg_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
   hists.append(expbkgHist)
-  array2hist(nexpbkgval,expbkgHist,errors=nexpbkgerrval)
+  array2hist(nexpbkgval,expbkgHist, errors=nexpbkgerrval)
   
   for iproc,proc in enumerate(procs):
     expHist = ROOT.TH1D('expproc_%s_%s' % (proc,tag),'',nbinsfull,-0.5, float(nbinsfull)-0.5)
     hists.append(expHist)
-    array2hist(normfullval[:,iproc], expHist, errors=normfullerrval[:,iproc])
+    #array2hist(normfullval[:,iproc], expHist,errors=normfullerrval[:,iproc])
+    array2hist(normfullval[:,iproc], expHist)
   
   print("done filling hists")
   
