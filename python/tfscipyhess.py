@@ -65,7 +65,7 @@ def jacobian(ys,
   gradient = array_ops.reshape(gradient, [-1])
 
   # Declare an iterator and tensor array loop variables for the gradients.
-  n = array_ops.size(x)
+  n = array_ops.size(gradient)
   loop_vars = [
       array_ops.constant(0, dtypes.int32),
       tensor_array_ops.TensorArray(x.dtype, n)
@@ -81,9 +81,10 @@ def jacobian(ys,
       back_prop = back_prop,
   )
 
+  _shapey = array_ops.shape(ys)
   _shape = array_ops.shape(x)
   _reshaped_hessian = array_ops.reshape(hessian.stack(),
-                                        array_ops.concat((_shape, _shape), 0))
+                                        array_ops.concat((_shapey, _shape), 0))
   #hessians.append(_reshaped_hessian)
   return _reshaped_hessian
 
