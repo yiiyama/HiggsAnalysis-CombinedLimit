@@ -31,11 +31,13 @@ ROOT.gROOT.SetBatch(True)
 ROOT.PyConfig.IgnoreCommandLineOptions = True
 argv.remove( '-b-' )
 
-from root_numpy import array2hist
+#from root_numpy import array2hist
 
 from array import array
 
-from HiggsAnalysis.CombinedLimit.tfscipyhess import ScipyTROptimizerInterface,jacobian
+from HiggsAnalysis.CombinedLimit.tfscipyhess import ScipyTROptimizerInterface,jacobian,sum_loop
+from tensorflow.python.ops.parallel_for.gradients import jacobian as pjacobian
+from tensorflow.python.ops.parallel_for.control_flow_ops import for_loop
 
 parser = OptionParser(usage="usage: %prog [options] datacard.txt -o output \nrun with --help to get list of options")
 parser.add_option("-t","--toys", default=0, type=int, help="run a given number of toys, 0 fits the data (default), and -1 fits the asimov toy")
@@ -426,7 +428,7 @@ def experr(expected, invhesschol):
   #jacprod = tf.matmul(jac,invhesschol,transpose_b=True)
   #errv = tf.sqrt(tf.reduce_sum(tf.square(jacprod),axis=-1))
   
-  dndx = tf.gradients(expected, x, grad_ys = u, gate_gradients=False)[0]
+  dndx = tf.gradients(expected, x, grad_ys = u, gate_gradients=True)[0]
   #dndx = tf.gradients(flatexp, x, grad_ys = u, gate_gradients=True)[0]
   #dndxalt = tf.gradients(dndx, u, grad_ys = v, gate_gradients=True)[0]
   #dndxre = tf.gradients(dndxalt, v, gate_gradients=True)[0]
@@ -434,6 +436,11 @@ def experr(expected, invhesschol):
   dndxv = tf.reshape(dndx,[-1,1])
   choldndxv = tf.matmul(tf.stop_gradient(invhesschol),dndxv,transpose_a=True)
   choldndx = tf.reshape(choldndxv,[-1])
+  #errj = pjacobian(choldndx,u,use_pfor=False)
+  #errsq = tf.square(errj)
+  #err = tf.sqrt(tf.reduce_sum(errsq,axis=0))
+  #return err
+  
   #choldndx = dndx
   
   #errsqs = []
@@ -444,49 +451,84 @@ def experr(expected, invhesschol):
   #err = tf.sqrt(tf.accumulate_n(errsqs))
   #return err
   
-  arr = tf.TensorArray(dtype=expected.dtype, size=nparms, element_shape=expected.shape)
-  loop_vars = [arr, tf.constant(0)]
-  #loop_vars = [tf.zeros_like(expected), tf.constant(0)]
-  def cond(errsq,j):
-    return (j < nparms)
+  def forbody(j):
+    grad = tf.square(tf.gradients(tf.gather(choldndx,j), u, gate_gradients=True)[0])
+    return grad
+    
+  errj = sum_loop(forbody,tf.zeros_like(expected),nparms,parallel_iterations=nthreadshess, back_prop=False)
+  print("errj:")
+  print(errj)
   
-  def body(errsq,j):
-    j = tf.Print(j,[j])
-    
-    
-    #gradsq = tf.square(tf.gradients(choldndx[j], u, gate_gradients=True)[0])
-    #gradsq = tf.gradients(choldndx[j], u, gate_gradients=True)[0]
-    gradsq = tf.gradients(tf.gather(choldndx,j), u, gate_gradients=False)[0]
-    #errsqout = errsq + gradsq
-    errsqout = errsq.write(j,gradsq)
-    
-    #errsq = errsq + tf.square(tf.gradients(choldndx[j], u, stop_gradients=x, gate_gradients=True)[0])
-    
-    #errsq = errsq + tf.square(tf.gradients(dndx,flatexp, grad_ys=invhesschol[j], gate_gradients=True)[0])
-    
-    #rjacj = tf.gradients(flatexp,x,
-    
-    #compute the jacobian
-    #expgrad = tf.gradients(flatexp[j],x,gate_gradients=True)[0]
-    #expgradcol = tf.reshape(expgrad,[-1,1])
-    ##this is equivalent to jac cov jac^T
-    #err = tf.sqrt(tf.reduce_sum(expgradcol*tf.matmul(invhess,expgradcol,b_is_sparse=False)))
-    ##err = tf.sqrt(tf.reduce_sum(tf.square(expgradcol)))
-    #arr = arr.write(j,err)
-    return (errsqout,j+1)
+  #errsq = tf.square(errj)
+  #err = tf.sqrt(tf.reduce_sum(errsq,axis=0))
+  err = tf.sqrt(errj)
+  return err
   
-  errsqloop,j = tf.while_loop(cond,body,loop_vars, parallel_iterations=nthreadshess, back_prop=False)
+  #arr = tf.TensorArray(expected.dtype,nparms)
+  #loop_vars = [arr,tf.constant(0)]
+  #def cond(arr,j):
+    #return j<nparms
   
-  errsqt = tf.square(errsqloop.stack())
-  #errsql = tf.unstack(errsqt,num=nparms,axis=0)
-  #err = tf.accumulate_n(errsql)
-  #err = tf.sqrt(tf.accumulate_n(errsqloop))
-  err = tf.sqrt(tf.reduce_sum(errsqt,axis=0))
+  #def body(arr,j):
+    ##grad = tf.expand_dims(tf.gradients(tf.gather(choldndx,j),u)[0],0)
+    #arr = arr.write(j,forbody(j))
+    #return (arr,j+1)
+  
+  #arr,j = tf.while_loop(cond,body,loop_vars, parallel_iterations=nthreadshess, back_prop=False)
+  ##errsq = tf.square(arr.concat())
+  #errsq = tf.square(arr.stack())
+  #err = tf.sqrt(tf.reduce_sum(errsq,axis=0))
+  #return err
+  
+  ##arr = tf.TensorArray(dtype=expected.dtype, size=nparms, element_shape=expected.shape)
+  #arr = tf.TensorArray(dtype=expected.dtype, size=nparms)
+  #loop_vars = [arr, tf.constant(0)]
+  ##loop_vars = [tf.zeros_like(expected), tf.constant(0)]
+  #def cond(errsq,j):
+    #return (j < nparms)
+  
+  #def body(errsq,j):
+    ##j = tf.Print(j,[j])
+    
+    
+    ##gradsq = tf.square(tf.gradients(choldndx[j], u, gate_gradients=True)[0])
+    ##gradsq = tf.gradients(choldndx[j], u, gate_gradients=True)[0]
+    ##gradsq = tf.gradients(tf.gather(choldndx,j), u, gate_gradients=True)[0]
+    #gradsq = tf.gradients(tf.gather(choldndx,j), u)[0]
+    ##errsqout = errsq + gradsq
+    #errsqout = errsq.write(j,tf.expand_dims(gradsq,0))
+    
+    ##errsq = errsq + tf.square(tf.gradients(choldndx[j], u, stop_gradients=x, gate_gradients=True)[0])
+    
+    ##errsq = errsq + tf.square(tf.gradients(dndx,flatexp, grad_ys=invhesschol[j], gate_gradients=True)[0])
+    
+    ##rjacj = tf.gradients(flatexp,x,
+    
+    ##compute the jacobian
+    ##expgrad = tf.gradients(flatexp[j],x,gate_gradients=True)[0]
+    ##expgradcol = tf.reshape(expgrad,[-1,1])
+    ###this is equivalent to jac cov jac^T
+    ##err = tf.sqrt(tf.reduce_sum(expgradcol*tf.matmul(invhess,expgradcol,b_is_sparse=False)))
+    ###err = tf.sqrt(tf.reduce_sum(tf.square(expgradcol)))
+    ##arr = arr.write(j,err)
+    #return (errsqout,j+1)
+  
+  ##errsqloop,j = tf.while_loop(cond,body,loop_vars, parallel_iterations=nthreadshess, back_prop=False)
+  #errsqloop,j = tf.while_loop(cond,body,loop_vars)
+  
+  ##errsqt = tf.square(errsqloop.stack())
+  
+  #errsqt = tf.square(errsqloop.concat())
+  ##errsqt = tf.reshape(errsqt,expected.shape)
+  ##errsql = tf.unstack(errsqt,num=nparms,axis=0)
+  ##err = tf.accumulate_n(errsql)
+  ##err = tf.sqrt(tf.accumulate_n(errsqloop))
+  #err = tf.sqrt(tf.reduce_sum(errsqt,axis=0))
   ##errv = arr.stack()
   #err = tf.sqrt(errsqloop)
   #errv = tf.sqrt(errsqloop)
   #errm = tf.reshape(errv,expected.shape)
-  return err
+  #return err
 
 def experrfast(jac, invhess):
   errm = tf.sqrt(tf.reduce_sum(tf.matmul(jac,invhess)*jac,axis=-1))
@@ -721,31 +763,31 @@ def fillHists(tag):
   hists = []
   
   if tag=='prefit':
-    #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre,normfullerrpre])
-    normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre])
+    normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre,normfullerrpre])
+    #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre])
     #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre])
   else:
-    #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr,normfullerr])
-    normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr])
+    normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr,normfullerr])
+    #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr])
     #normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr])
   
-  expfullHist = ROOT.TH1D('expfull_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
-  hists.append(expfullHist)
-  array2hist(nexpfullval,expfullHist, errors=nexpfullerrval)
+  #expfullHist = ROOT.TH1D('expfull_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
+  #hists.append(expfullHist)
+  ##array2hist(nexpfullval,expfullHist, errors=nexpfullerrval)
   
-  expsigHist = ROOT.TH1D('expsig_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
-  hists.append(expsigHist)
-  array2hist(nexpsigval,expsigHist, errors=nexpsigerrval)
+  #expsigHist = ROOT.TH1D('expsig_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
+  #hists.append(expsigHist)
+  ##array2hist(nexpsigval,expsigHist, errors=nexpsigerrval)
   
-  expbkgHist = ROOT.TH1D('expbkg_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
-  hists.append(expbkgHist)
-  array2hist(nexpbkgval,expbkgHist, errors=nexpbkgerrval)
+  #expbkgHist = ROOT.TH1D('expbkg_%s' % tag,'',nbinsfull,-0.5, float(nbinsfull)-0.5)
+  #hists.append(expbkgHist)
+  #array2hist(nexpbkgval,expbkgHist, errors=nexpbkgerrval)
   
-  for iproc,proc in enumerate(procs):
-    expHist = ROOT.TH1D('expproc_%s_%s' % (proc,tag),'',nbinsfull,-0.5, float(nbinsfull)-0.5)
-    hists.append(expHist)
-    #array2hist(normfullval[:,iproc], expHist,errors=normfullerrval[:,iproc])
-    array2hist(normfullval[:,iproc], expHist)
+  #for iproc,proc in enumerate(procs):
+    #expHist = ROOT.TH1D('expproc_%s_%s' % (proc,tag),'',nbinsfull,-0.5, float(nbinsfull)-0.5)
+    #hists.append(expHist)
+    ##array2hist(normfullval[:,iproc], expHist,errors=normfullerrval[:,iproc])
+    ##array2hist(normfullval[:,iproc], expHist)
   
   print("done filling hists")
   
@@ -829,7 +871,7 @@ for itoy in range(ntoys):
   if options.saveHists and not options.toys > 1:
     nobsval = sess.run(nobs)
     obsHist = ROOT.TH1D('obs','',nbins,-0.5, float(nbins)-0.5)
-    array2hist(nobsval, obsHist)
+    #array2hist(nobsval, obsHist)
     
     prefithists = fillHists('prefit')
   
@@ -894,8 +936,8 @@ for itoy in range(ntoys):
       if not options.toys > 0:
         variances2D     = parameterErrors[np.newaxis].T * parameterErrors
         correlationMatrix = np.divide(invhessoutval, variances2D)
-        array2hist(correlationMatrix, correlationHist)
-        array2hist(invhessoutval, covarianceHist)
+        #array2hist(correlationMatrix, correlationHist)
+        #array2hist(invhessoutval, covarianceHist)
     else:
       sigmasv = -99.*np.ones_like(outvals)
     
