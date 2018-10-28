@@ -17,7 +17,7 @@ import numpy as np
 import h5py
 import h5py_cache
 from HiggsAnalysis.CombinedLimit.tfh5pyutils import maketensor,makesparsetensor
-from HiggsAnalysis.CombinedLimit.tfsparseutils import simple_sparse_tensor_dense_matmul, simple_sparse_slice0begin, simple_sparse_to_dense, SimpleSparseTensor
+from HiggsAnalysis.CombinedLimit.tfsparseutils import simple_sparse_tensor_dense_matmul, simple_sparse_slice0begin, simple_sparse_to_dense, SimpleSparseTensor, makeCache
 from HiggsAnalysis.CombinedLimit.lsr1trustobs import SR1TrustExact
 import scipy
 import math
@@ -58,6 +58,8 @@ parser.add_option("","--POIDefault", default=1., type=float, help="mode for POI'
 parser.add_option("","--doBenchmark", default=False, action='store_true', help="run benchmarks")
 parser.add_option("","--saveHists", default=False, action='store_true', help="save prefit and postfit histograms")
 parser.add_option("","--computeHistErrors", default=False, action='store_true', help="propagate uncertainties to prefit and postfit histograms")
+parser.add_option("","--binByBinStat", default=False, action='store_true', help="add bin-by-bin statistical uncertainties on templates (using Barlow and Beeston 'lite' method")
+parser.add_option("","--correlateXsecStat", default=False, action='store_true', help="Assume that cross sections in masked channels are correlated with expected values in templates (ie computed from the same MC events)")
 (options, args) = parser.parse_args()
 
 if len(args) == 0:
@@ -83,7 +85,6 @@ maskedchans = f['hmaskedchans'][...]
 
 #load arrays from file
 hdata_obs = f['hdata_obs']
-
 sparse = not 'hnorm' in f
 
 if sparse:
@@ -109,6 +110,9 @@ nsignals = len(signals)
 #note that this does NOT trigger the actual reading from disk, since this only happens when the
 #returned tensors are evaluated for the first time inside the graph
 data_obs = maketensor(hdata_obs)
+if options.binByBinStat:
+  hkstat = f['hkstat']
+  kstat = maketensor(hkstat)
 if sparse:
   norm_sparse = makesparsetensor(hnorm_sparse)
   logk_sparse = makesparsetensor(hlogk_sparse)
@@ -194,8 +198,8 @@ if sparse:
   snorm = tf.exp(logsnorm)
   
   snormnorm_sparse = SimpleSparseTensor(norm_sparse.indices, snorm*norm_sparse.values, norm_sparse.dense_shape)
-  nexpfull = simple_sparse_tensor_dense_matmul(snormnorm_sparse,mrnorm)
-  nexpfull = tf.squeeze(nexpfull,-1)
+  nexpfullcentral = simple_sparse_tensor_dense_matmul(snormnorm_sparse,mrnorm)
+  nexpfullcentral = tf.squeeze(nexpfullcentral,-1)
 
   #slice the sparse tensor along axis 0 only, since this is simpler than slicing in
   #other dimensions due to the ordering of the tensor,
@@ -205,13 +209,15 @@ if sparse:
   snormnormmasked0 = simple_sparse_to_dense(snormnormmasked0_sparse)
   snormnormmasked = snormnormmasked0[:,:nsignals]
   
+  normmasked0_sparse = simple_sparse_slice0begin(norm_sparse, nbins, doCache=True)
+  normmasked0 = simple_sparse_to_dense(normmasked0_sparse)
+  normmasked = normmasked0[:,:nsignals]
+  
+  
   #TODO consider doing this one column at a time to save memory
   if options.saveHists:
     snormnorm = simple_sparse_to_dense(snormnorm_sparse)
-        
-    normfull = ernorm*snormnorm
-    nexpsig = tf.reduce_sum(normfull[:,:nsignals],axis=-1)
-    nexpbkg = tf.reduce_sum(normfull[:,nsignals:],axis=-1)
+    normfullcentral = ernorm*snormnorm
   
 else:
   #matrix encoding effect of nuisance parameters
@@ -237,19 +243,67 @@ else:
   #pnormfull = rnorm*snorm*norm
   #nexpfull = tf.reduce_sum(pnormfull,axis=-1)
   snormnorm = snorm*norm  
-  nexpfull = tf.matmul(snormnorm, mrnorm)
-  nexpfull = tf.squeeze(nexpfull,-1)
+  nexpfullcentral = tf.matmul(snormnorm, mrnorm)
+  nexpfullcentral = tf.squeeze(nexpfullcentral,-1)
 
   snormnormmasked = snormnorm[nbins:,:nsignals]
   
+  normmasked = norm[nbins:,:nsignals]
+  
   if options.saveHists:
-    normfull = ernorm*snormnorm
-    nexpsig = tf.reduce_sum(normfull[:,:nsignals],axis=-1)
-    nexpbkg = tf.reduce_sum(normfull[:,nsignals:],axis=-1)
+    normfullcentral = ernorm*snormnorm
     
 pmaskedexp = r*tf.reduce_sum(snormnormmasked,axis=0)
 
-maskedexp = nexpfull[nbins:]
+maskedexp = nexpfullcentral[nbins:]
+
+nexpcentral = nexpfullcentral[:nbins]
+
+if options.binByBinStat:
+  #beta = (nobs + kstat - 1.)/(nexpcentral+kstat)
+  beta = (nobs + kstat)/(nexpcentral+kstat)
+  betagen = tf.Variable(tf.ones([nbins],dtype=dtype),name="betagen")
+  #beta = tf.Print(beta,[beta],message="beta",summarize=10000)
+  nexp = beta*nexpcentral
+  nexpgen = betagen*nexpcentral
+  
+  betafull = tf.concat([beta,tf.ones_like(maskedexp)],axis=0)
+  nexpfull = betafull*nexpfullcentral
+  if options.correlateXsecStat:
+    #partially propagate statistical fluctuations on expected values to yields in
+    #masked channels, based on the fraction of overlapping events
+        
+    sumnormmasked = tf.reduce_sum(normmasked,axis=0)
+    
+    logbeta = tf.log(beta)
+    logbetafull = tf.concat([logbeta,tf.zeros(shape=[nbinsmasked],dtype=dtype)],axis=0)
+    logbetafull = tf.reshape(logbetafull,[-1,1])
+    
+    if sparse:
+      slogbeta = simple_sparse_tensor_dense_matmul(norm_sparse,logbetafull,adjoint_a=True)
+    else:
+      slogbeta = tf.matmul(norm,logbetafull,transpose_a=True)
+    
+    slogbeta = tf.reshape(slogbeta,[-1])
+    slogbetasig = slogbeta[:nsignals]/sumnormmasked
+    
+    expslogbetasig = tf.exp(slogbetasig)
+    
+    pmaskedexp *= expslogbetasig
+    snormnormmasked *= tf.reshape(expslogbetasig,[1,-1])
+    
+    
+  if options.saveHists:
+    #TODO: Currently modification of yields from bin-by-bin uncertainties is
+    #uniformly distributed over all processes, consider a more fine-grained breakdown based
+    #on "full" version of bin-by-bin stat uncertainties
+    normfull = tf.reshape(betafull,[-1,1])*normfullnom
+else:
+  nexp = nexpcentral
+  nexpgen = nexpcentral
+  nexpfull = nexpfullcentral
+  if options.saveHists:
+    normfull = normfullcentral
 
 #matrix multiplication below is equivalent to
 #pmaskedexpnorm = r*tf.reduce_sum(snormnormmasked/maskedexp, axis=0)
@@ -258,14 +312,20 @@ mmaskedexpr = tf.expand_dims(tf.reciprocal(maskedexp),0)
 pmaskedexpnorm = tf.matmul(mmaskedexpr,snormnormmasked)
 pmaskedexpnorm = tf.squeeze(pmaskedexpnorm,0)
 pmaskedexpnorm = r*pmaskedexpnorm
- 
-nexp = nexpfull[:nbins]
 
-nexpsafe = tf.where(tf.equal(nobs,tf.zeros_like(nobs)), tf.ones_like(nobs), nexp)
+  
+if options.saveHists:
+  nexpsig = tf.reduce_sum(normfull[:,:nsignals],axis=-1)
+  nexpbkg = tf.reduce_sum(normfull[:,nsignals:],axis=-1)
+
+
+nobsnull = tf.equal(nobs,tf.zeros_like(nobs))
+
+nexpsafe = tf.where(nobsnull, tf.ones_like(nobs), nexp)
 lognexp = tf.log(nexpsafe)
 
 nexpnom = tf.Variable(nexp, trainable=False, name="nexpnom")
-nexpnomsafe = tf.where(tf.equal(nobs,tf.zeros_like(nobs)), tf.ones_like(nobs), nexpnom)
+nexpnomsafe = tf.where(nobsnull, tf.ones_like(nobs), nexpnom)
 lognexpnom = tf.log(nexpnomsafe)
 
 #final likelihood computation
@@ -281,6 +341,18 @@ lc = tf.reduce_sum(0.5*tf.square(theta - theta0))
 
 l = ln + lc
 lfull = lnfull + lc
+
+if options.binByBinStat:
+  #lbetav = -(kstat-1.)*tf.log(beta) + kstat*beta
+  lbetavfull = -kstat*tf.log(beta) + kstat*beta
+  #lbetavfull = tf.where(nobsnull,tf.zeros_like(lbetavfull),lbetavfull)
+  lbetafull = tf.reduce_sum(lbetavfull)
+  
+  lbetav = lbetavfull - kstat
+  lbeta = tf.reduce_sum(lbetav)
+  
+  l = l + lbeta
+  lfull = lfull + lbetafull
  
 #name outputs
 poi = tf.identity(poi, name=options.POIMode)
@@ -413,15 +485,20 @@ for scanname in scannames:
   minosminimizers[scanname] = minosminimizer
 
 globalinit = tf.global_variables_initializer()
-nexpnomassign = tf.assign(nexpnom,nexp)
+nexpnomassign = tf.assign(nexpnom,nexpcentral)
 dataobsassign = tf.assign(nobs,data_obs)
-asimovassign = tf.assign(nobs,nexp)
+asimovassign = tf.assign(nobs,nexpgen)
 asimovrandomizestart = tf.assign(x,tf.clip_by_value(tf.contrib.distributions.MultivariateNormalFullCovariance(x,invhessian).sample(),lb,ub))
 bootstrapassign = tf.assign(nobs,tf.random_poisson(nobs,shape=[],dtype=dtype))
-toyassign = tf.assign(nobs,tf.random_poisson(nexp,shape=[],dtype=dtype))
+toyassign = tf.assign(nobs,tf.random_poisson(nexpgen,shape=[],dtype=dtype))
+#TODO properly implement randomization of constraint parameters associated with bin-by-bin stat nuisances for frequentist toys,
+#currently bin-by-bin stat fluctuations are always handled in a bayesian way in toys
+#this also means bin-by-bin stat fluctuations are not consistently propagated for bootstrap toys from data
 frequentistassign = tf.assign(theta0,theta + tf.random_normal(shape=theta.shape,dtype=dtype))
 thetastartassign = tf.assign(x, tf.concat([xpoi,theta0],axis=0))
 bayesassign = tf.assign(x, tf.concat([xpoi,theta+tf.random_normal(shape=theta.shape,dtype=dtype)],axis=0))
+if options.binByBinStat:
+  bayesassignbeta = tf.assign(betagen, tf.random_gamma(shape=[],alpha=kstat+1.,beta=kstat,dtype=tf.as_dtype(dtype)))
 
 #initialize output tree
 f = ROOT.TFile( 'fitresults_%i.root' % seed, 'recreate' )
@@ -647,12 +724,21 @@ for itoy in range(ntoys):
       sess.run(frequentistassign)
     else:
       #randomize actual values
-      sess.run(bayesassign)      
+      sess.run(bayesassign)
+      
+    if options.binByBinStat:
+      #TODO properly implement randomization of constraint parameters associated with bin-by-bin stat nuisances for frequentist toys,
+      #currently bin-by-bin stat fluctuations are always handled in a bayesian way in toys
+      #this also means bin-by-bin stat fluctuations are not consistently propagated for bootstrap toys from data
+      sess.run(bayesassignbeta)
       
     outvalsgens,thetavalsgen = sess.run([outputs,theta])  
       
     if options.bootstrapData:
       #randomize from observed data
+      if options.binByBinStat and options.toysFrequentist:
+        raise Exception("Since bin-by-bin statistical uncertainties are always propagated in a bayesian manner, they cannot currently be consistently\
+          propagated for bootstrap toys")
       sess.run(dataobsassign)
       sess.run(bootstrapassign)
     else:
