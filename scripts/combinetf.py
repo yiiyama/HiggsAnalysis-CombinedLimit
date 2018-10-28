@@ -315,6 +315,9 @@ pmaskedexpnorm = r*pmaskedexpnorm
 
   
 if options.saveHists:
+  nexpsigcentral = tf.reduce_sum(normfullcentral[:,:nsignals],axis=-1)
+  nexpbkgcentral = tf.reduce_sum(normfullcentral[:,nsignals:],axis=-1)
+  
   nexpsig = tf.reduce_sum(normfull[:,:nsignals],axis=-1)
   nexpbkg = tf.reduce_sum(normfull[:,nsignals:],axis=-1)
 
@@ -442,10 +445,10 @@ if options.saveHists:
   invhessianchol = tf.cholesky(invhessian)
   
   #compute uncertainties for expectations (prefit)
-  normfullerrpre = experr(normfull,invhessianprefitchol)
-  nexpfullerrpre = experr(nexpfull,invhessianprefitchol)
-  nexpsigerrpre = experr(nexpsig, invhessianprefitchol)
-  nexpbkgerrpre = experr(nexpbkg, invhessianprefitchol)
+  normfullerrpre = experr(normfullcentral,invhessianprefitchol)
+  nexpfullerrpre = experr(nexpfullcentral,invhessianprefitchol)
+  nexpsigerrpre = experr(nexpsigcentral, invhessianprefitchol)
+  nexpbkgerrpre = experr(nexpbkgcentral, invhessianprefitchol)
   
   ##compute uncertainties for expectations (postfit, using the full covariance matrix)
   normfullerr = experr(normfull,invhessianchol)
@@ -658,9 +661,9 @@ def fillHists(tag, witherrors=options.computeHistErrors):
   
   if tag=='prefit':
     if witherrors:
-      normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre,normfullerrpre])
+      normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfullcentral,nexpfullcentral,nexpsigcentral,nexpbkgcentral,nexpfullerrpre,nexpsigerrpre,nexpbkgerrpre,normfullerrpre])
     else:
-      normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg]) + [None,None,None,None]
+      normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfullcentral,nexpfullcentral,nexpsigcentral,nexpbkgcentral]) + [None,None,None,None]
   else:
     if witherrors:
       normfullval, nexpfullval, nexpsigval, nexpbkgval, nexpfullerrval, nexpsigerrval, nexpbkgerrval, normfullerrval = sess.run([normfull,nexpfull,nexpsig,nexpbkg,nexpfullerr,nexpsigerr,nexpbkgerr,normfullerr])
