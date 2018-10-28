@@ -297,7 +297,7 @@ if options.binByBinStat:
     #TODO: Currently modification of yields from bin-by-bin uncertainties is
     #uniformly distributed over all processes, consider a more fine-grained breakdown based
     #on "full" version of bin-by-bin stat uncertainties
-    normfull = tf.reshape(betafull,[-1,1])*normfullnom
+    normfull = tf.reshape(betafull,[-1,1])*normfullcentral
 else:
   nexp = nexpcentral
   nexpgen = nexpcentral
