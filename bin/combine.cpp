@@ -5,26 +5,27 @@
 #include <TTree.h>
 #include <RooRandom.h>
 #include <iostream>
+#include <fstream>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <stdexcept>
 #include <boost/program_options.hpp>
-#include "../interface/ProfileLikelihood.h"
+#include "../interface/Significance.h"
 #include "../interface/HybridNew.h"
 #include "../interface/BayesianFlatPrior.h"
 #include "../interface/BayesianToyMC.h"
 #include "../interface/MarkovChainMC.h"
 #include "../interface/FeldmanCousins.h"
-#include "../interface/MaxLikelihoodFit.h"
-#include "../interface/Asymptotic.h"
-#include "../interface/AsymptoticNew.h"
+#include "../interface/FitDiagnostics.h"
+#include "../interface/AsymptoticLimits.h"
 #include "../interface/GoodnessOfFit.h"
 #include "../interface/ChannelCompatibilityCheck.h"
 #include "../interface/MultiDimFit.h"
 #include "../interface/CascadeMinimizer.h"
 #include "../interface/ProfilingTools.h"
 #include "../interface/GenerateOnly.h"
+#include "../interface/Logger.h"
 #include <map>
 
 using namespace std;
@@ -43,19 +44,21 @@ int main(int argc, char **argv) {
 
   vector<string> librariesToLoad;
   vector<string> runtimeDefines;
+  vector<string> modelPoints;
+  vector<string> modelParamNameVector_;
+  vector<string> modelParamValVector_;
 
   Combine combiner;
 
   map<string, LimitAlgo *> methods;
-  algo = new ProfileLikelihood(); methods.insert(make_pair(algo->name(), algo));
+  algo = new Significance(); methods.insert(make_pair(algo->name(), algo));
   algo = new BayesianFlatPrior(); methods.insert(make_pair(algo->name(), algo));
   algo = new BayesianToyMC(); methods.insert(make_pair(algo->name(), algo));
   algo = new MarkovChainMC();  methods.insert(make_pair(algo->name(), algo));
   algo = new HybridNew();  methods.insert(make_pair(algo->name(), algo));
   algo = new FeldmanCousins();  methods.insert(make_pair(algo->name(), algo));
-  algo = new MaxLikelihoodFit();  methods.insert(make_pair(algo->name(), algo));
-  algo = new Asymptotic();  methods.insert(make_pair(algo->name(), algo));
-  algo = new AsymptoticNew();  methods.insert(make_pair(algo->name(), algo));
+  algo = new FitDiagnostics();  methods.insert(make_pair(algo->name(), algo));
+  algo = new AsymptoticLimits();  methods.insert(make_pair(algo->name(), algo));
   algo = new GoodnessOfFit();  methods.insert(make_pair(algo->name(), algo));
   algo = new ChannelCompatibilityCheck();  methods.insert(make_pair(algo->name(), algo));
   algo = new MultiDimFit();  methods.insert(make_pair(algo->name(), algo));
@@ -72,8 +75,8 @@ int main(int argc, char **argv) {
   po::options_description desc("Main options");
   desc.add_options()
     ("datacard,d", po::value<string>(&datacard), "Datacard file (can also be specified directly without the -d or --datacard)")
-    ("method,M",      po::value<string>(&whichMethod)->default_value("ProfileLikelihood"), methodsDesc.c_str())
-    ("verbose,v",  po::value<int>(&verbose)->default_value(1), "Verbosity level (-1 = very quiet; 0 = quiet, 1 = verbose, 2+ = debug)")
+    ("method,M",      po::value<string>(&whichMethod)->default_value("AsymptoticLimits"), methodsDesc.c_str())
+    ("verbose,v",  po::value<int>(&verbose)->default_value(0), "Verbosity level (-1 = very quiet; 0 = quiet, 1 = verbose, 2+ = debug)")
     ("help,h", "Produce help message")
     ;
   combiner.statOptions().add_options()
@@ -91,6 +94,7 @@ int main(int argc, char **argv) {
     ("igpMem", "Setup support for memory profiling using IgProf")
     ("perfCounters", "Dump performance counters at end of job")
     ("LoadLibrary,L", po::value<vector<string> >(&librariesToLoad), "Load library through gSystem->Load(...). Can specify multiple libraries using this option multiple times")
+    ("keyword-value",  po::value<vector<string> >(&modelPoints), "Set keyword values with 'WORD=VALUE', will replace $WORD with VALUE in datacards. Filename will also be extended with 'WORDVALUE'. Can specify multiple times")
     ("X-rtd",  po::value<vector<string> >(&runtimeDefines), "Define some constants to be used at runtime (for debugging purposes). The syntax is --X-rtd identifier[=value], where value is an integer and defaults to 1. Can specify multiple times")
     ("X-fpeMask", po::value<int>(), "Set FPE mask: 1=NaN, 2=Div0, 4=Overfl, 8=Underf, 16=Inexact; 7=default")
     ;
@@ -101,7 +105,8 @@ int main(int argc, char **argv) {
   po::positional_options_description p;
   p.add("datacard", -1);
   po::variables_map vm, vm0;
-
+ 
+  
   // parse the first time, using only common options and allow unregistered options 
   try{
     po::store(po::command_line_parser(argc, argv).options(desc).allow_unregistered().run(), vm0);
@@ -122,9 +127,32 @@ int main(int argc, char **argv) {
     cout << desc;
     map<string, LimitAlgo *>::const_iterator i;
     for(i = methods.begin(); i != methods.end(); ++i) {
+        if ( (!vm0["method"].defaulted()) && whichMethod.compare(i->second->name())!=0 ) continue;
         cout << i->second->options() << "\n";
     }
     return 0;
+  }
+
+  if (verbose>1){
+   std::ifstream splashFile; splashFile.open("data/splash.txt");
+   while(splashFile.good()) { 
+     std::cout << (char)splashFile.get() ; 
+   }
+   std::cout << std::endl;
+   splashFile.close(); 
+  } else {
+   std::cout << " <<< Combine >>> " << std::endl;
+  }
+
+  // Temporary printout for rename of methods ...
+  std::map<std::string,std::string> renames ;
+  renames["MaxLikelihoodFit"] 	= "FitDiagnostics";
+  renames["Asymptotic"] 	= "AsymptoticLimits";
+  renames["ProfileLikelihood"] 	= "Significance";
+  map<string, string >::const_iterator it_rename = renames.find(whichMethod);
+  if ( it_rename != renames.end())  { 
+    cout << " WARNING --  From combine v7, method " << whichMethod << " has been renamed to " << it_rename->second  << endl;
+    whichMethod = it_rename->second ;
   }
 
   // now search for algo, and add option
@@ -172,7 +200,7 @@ int main(int argc, char **argv) {
       cerr << "Error when configuring the algorithm " << whichMethod << ":\n\t" << ex.what() << std::endl;
       return 2002;
   }
-  cout << ">>> method used to compute upper limit is " << whichMethod << endl;
+  cout << ">>> method used is " << whichMethod << endl;
 
   if (!whichHintMethod.empty()) {
       map<string, LimitAlgo *>::const_iterator it_hint = methods.find(whichHintMethod);
@@ -204,6 +232,23 @@ int main(int argc, char **argv) {
   TString toyName  = "";  if (runToys > 0 || seed != 123456 || vm.count("saveToys")) toyName  = TString::Format("%d.", seed);
   if (vm.count("expectedFromGrid") && !vm["expectedFromGrid"].defaulted()) toyName += TString::Format("quant%.3f.", vm["expectedFromGrid"].as<float>());
   if (vm.count("expected")         && !vm["expected"].defaulted())         toyName += TString::Format("quant%.3f.", vm["expected"].as<float>());
+
+  if (vm.count("keyword-value") ) {
+    for (vector<string>::const_iterator rmp = modelPoints.begin(), endrmp = modelPoints.end(); rmp != endrmp; ++rmp) {
+      std::string::size_type idx = rmp->find('=');
+      if (idx == std::string::npos) {
+     	cerr << "No value found for keyword :\n\t" << *rmp << " use --keyword-value WORD=VALUE " << std::endl;
+      } else {
+        std::string name   = rmp->substr(0, idx);
+        std::string svalue = rmp->substr(idx+1);
+        if (verbose > 0) std::cout << "Setting keyword " << name << " to " << svalue << std::endl;
+	modelParamNameVector_.push_back(name);
+	modelParamValVector_.push_back(svalue);
+	massName += TString(name.c_str())+TString(svalue.c_str())+".";
+     }
+    }
+  }
+
   TString fileName = "higgsCombine" + name + "."+whichMethod+"."+massName+toyName+"root";
   TFile *test = new TFile(fileName, "RECREATE"); outputFile = test;
   TTree *t = new TTree("limit", "limit");
@@ -219,6 +264,10 @@ int main(int argc, char **argv) {
   t->Branch("t_cpu",   &t_cpu_,  "t_cpu/F");
   t->Branch("t_real",  &t_real_, "t_real/F");
   t->Branch("quantileExpected",  &g_quantileExpected_, "quantileExpected/F");
+  for (unsigned int mpi=0;mpi<modelParamNameVector_.size();++mpi){
+	std::string name = modelParamNameVector_[mpi];
+  	t->Branch(Form("%s",name.c_str()),  &modelParamValVector_[mpi]);
+  }
   
   writeToysHere = test->mkdir("toys","toys"); 
   if (toysFile != "") readToysFromHere = TFile::Open(toysFile.c_str());
@@ -252,6 +301,11 @@ int main(int argc, char **argv) {
   runtimedef::set("ADDNLL_ROOREALSUM_NONORM",1);
   runtimedef::set("ADDNLL_ROOREALSUM_BASICINT",1);
   runtimedef::set("ADDNLL_ROOREALSUM_KEEPZEROS",1);
+  runtimedef::set("ADDNLL_PRODNLL",1);
+  runtimedef::set("ADDNLL_HFNLL",1);
+  runtimedef::set("ADDNLL_HISTFUNCNLL",1);
+  runtimedef::set("ADDNLL_ROOREALSUM_CHEAPPROD",1);
+ 
 
 
   for (vector<string>::const_iterator rtdp = runtimeDefines.begin(), endrtdp = runtimeDefines.end(); rtdp != endrtdp; ++rtdp) {
@@ -270,6 +324,7 @@ int main(int argc, char **argv) {
 
   try {
      combiner.run(datacard, dataset, limit, limitErr, iToy, t, runToys);
+     if (verbose>0) Logger::instance().printLog(); 
   } catch (std::exception &ex) {
      cerr << "Error when running the combination:\n\t" << ex.what() << std::endl;
      test->Close();

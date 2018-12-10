@@ -11,14 +11,25 @@
 #include "HiggsAnalysis/CombinedLimit/interface/ToyMCSamplerOpt.h"
 #include "HiggsAnalysis/CombinedLimit/interface/CloseCoutSentry.h"
 #include "HiggsAnalysis/CombinedLimit/interface/CascadeMinimizer.h"
+#include "HiggsAnalysis/CombinedLimit/interface/Logger.h"
 
 RooAbsData *asimovutils::asimovDatasetNominal(RooStats::ModelConfig *mc, double poiValue, int verbose) {
         RooArgSet  poi(*mc->GetParametersOfInterest());
         RooRealVar *r = dynamic_cast<RooRealVar *>(poi.first());
         r->setConstant(true); r->setVal(poiValue);
         toymcoptutils::SimPdfGenInfo newToyMC(*mc->GetPdf(), *mc->GetObservables(), false); 
+
+	if (verbose>2) {
+	    Logger::instance().log(std::string(Form("AsimovUtils.cc: %d -- Parameters after fit for asimov dataset",__LINE__)),Logger::kLogLevelInfo,__func__);
+    	    std::auto_ptr<TIterator> iter(mc->GetPdf()->getParameters((const RooArgSet*) 0)->createIterator());
+    	    for (RooAbsArg *a = (RooAbsArg *) iter->Next(); a != 0; a = (RooAbsArg *) iter->Next()) {
+	  	TString varstring = utils::printRooArgAsString(a);
+	  	Logger::instance().log(std::string(Form("AsimovUtils.cc: %d -- %s",__LINE__,varstring.Data())),Logger::kLogLevelInfo,__func__);
+	    }
+	}
+
         RooRealVar *weightVar = 0;
-        RooAbsData *asimov = newToyMC.generateAsimov(weightVar); 
+        RooAbsData *asimov = newToyMC.generateAsimov(weightVar,verbose); 
         delete weightVar;
         return asimov;
 }
@@ -53,9 +64,19 @@ RooAbsData *asimovutils::asimovDatasetWithFit(RooStats::ModelConfig *mc, RooAbsD
             std::cout << "Nuisance parameters after fit for asimov dataset: " << std::endl;
             mc->GetNuisanceParameters()->Print("V");
         }
+
+	if (verbose>2) { 
+	    Logger::instance().log(std::string(Form("AsimovUtils.cc: %d -- Parameters after fit for asimov dataset",__LINE__)),Logger::kLogLevelInfo,__func__);
+    	    std::auto_ptr<TIterator> iter(mc->GetPdf()->getParameters(realdata)->createIterator());
+    	    for (RooAbsArg *a = (RooAbsArg *) iter->Next(); a != 0; a = (RooAbsArg *) iter->Next()) {
+	  	TString varstring = utils::printRooArgAsString(a);
+	  	Logger::instance().log(std::string(Form("AsimovUtils.cc: %d -- %s",__LINE__,varstring.Data())),Logger::kLogLevelInfo,__func__);
+	    }
+	}
+
         toymcoptutils::SimPdfGenInfo newToyMC(*mc->GetPdf(), *mc->GetObservables(), false); 
         RooRealVar *weightVar = 0;
-        RooAbsData *asimov = newToyMC.generateAsimov(weightVar); 
+        RooAbsData *asimov = newToyMC.generateAsimov(weightVar,verbose); 
         delete weightVar;
 
         // NOW SNAPSHOT THE GLOBAL OBSERVABLES
@@ -106,7 +127,7 @@ RooAbsData *asimovutils::asimovDatasetWithFit(RooStats::ModelConfig *mc, RooAbsD
                     throw std::runtime_error(Form("AsimovUtils: can't find nuisance for constraint term %s", cterm->GetName()));
                 }
                 std::string pdfName(cterm->ClassName());
-                if (pdfName == "RooGaussian" || pdfName == "SimpleGaussianConstraint"  || pdfName == "RooBifurGauss" || pdfName == "RooPoisson" || pdfName == "RooGenericPdf") {
+                if (pdfName == "RooGaussian" || pdfName == "SimpleGaussianConstraint"  || pdfName == "RooBifurGauss" || pdfName == "RooPoisson"  || pdfName == "SimplePoissonConstraint" || pdfName == "RooGenericPdf") {
                     // this is easy
                     rrv.setVal(match->getVal());
                 } else if (pdfName == "RooGamma") {

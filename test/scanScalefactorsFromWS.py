@@ -1,25 +1,46 @@
-import ROOT
-ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
-ROOT.gROOT.SetBatch(1)
-#ROOT.gStyle.SetNumberContours(255)
-
-import sys,numpy,array
+#Script to plot XS*BR as a function of POIs (kappas/lambdas) 
+# Run with "python test/scanScalefactorsFromWS.py -M c7 -o outfolder -m 125.09 
+#   Note that most LHCHCG models use the c7 base. This is just the name prefix of the scaling function 
+#   you may need to use eg CvCf, c6 etc for older modelts in the CMS HCG repo - if in doublt look for the XSBR functions in the WS
+# for A1/B1 (mu based) models, the output of t2w will show how the model scales
+import os,sys,numpy,array
 import itertools
 
 from optparse import OptionParser
 parser = OptionParser(usage="usage: %prog [options] file \nrun with --help to get list of options")
-parser.add_option("-M","--Model",dest="model",default="CvCf",type='str',help="Name of model used in model builder")
-parser.add_option("-m","--mh",dest="mh",default=125.8,type='float',help="Lightest Higgs Mass")
-parser.add_option("-e","--energydependance",dest="energydependant",action='store_true')
-parser.add_option("-s","--step",dest="stepsize",type='float',default=0.05)
+parser.add_option("-M","--Model",dest="model",default="DEFAULT",type='str',help="Name of model used in model builder (note its the name of the scaling functions, eg the L1/K models use 'c7'")
+parser.add_option("-m","--mh",dest="mh",default=125.09,type='float',help="Lightest Higgs Mass")
+#parser.add_option("-e","--energydependance",dest="energydependant",action='store_true')
+parser.add_option("-s","--step",dest="stepsize",type='float',default=0.5)
+parser.add_option("","--scaling_prefix",dest="scaling_prefix",type='str',default="XSBRscal", help="Prefix for scaler, eg usually this is XSBRscal")
 parser.add_option("","--slice",dest="sliceval",type='str', default = "")
+parser.add_option("","--energies",dest="energies",type='str', default = "13TeV", help= "A comma separated list of the energies to show expressions for")
+parser.add_option("","--skipTree", default = False, action='store_true', help= "Skip filling the tree of points in the ND space (slow)")
+parser.add_option("-o","--out",dest="out",type='str', default = "", help= "Output folder for the plots/trees etc")
+parser.add_option("-P","--prod",dest="prod",type='str', default = "", help= "Overwrite default production channels (comma separated list in a string)")
+parser.add_option("-D","--decay",dest="decay",type='str', default = "", help= "Overwrite default decay channels (comma separated list in a string)")
 (options,args)=parser.parse_args()
 
+import ROOT
+ROOT.gSystem.Load("libHiggsAnalysisCombinedLimit")
+ROOT.gROOT.SetBatch(1)
+
+if not options.out: options.out = "."
+else: os.system("mkdir -p %s"%options.out)
+
+#ROOT.gStyle.SetNumberContours(255)
 # Can do full matrix of prod*decay
-energies = ["7TeV","8TeV"]
-production_channels 	= ["ggH","qqH","WH","ZH","VH","ttH"]
-decay_channels 		= ["hgg","hzz","hww","htt","hbb"]
+# In the future we should really think anout just importing these from the SMHiggs Builder!
+energies = list(options.energies.split(","))
+production_channels 	= ["ggH","qqH","WH","ZH","ttH","ggZH","tHq","tHW","bbH"]
+decay_channels 		= ['hww','hzz','hgg','hbb','hcc','htt','hmm','hzg','hgluglu','hinv']
 decay_modes 		= ["hgg","hvv","hff"]
+if options.prod: 
+	production_channels = options.prod.split(",")
+	print "Will look for productions ", production_channels
+if options.decay: 
+	decay_channels      = options.decay.split(",")
+	print "Will look for decays ", decay_channels
 
 # Stepping of parameters in the model 
 step = options.stepsize
@@ -51,6 +72,14 @@ def createBranches(tree, params):
     for p in params.keys():
 	tree.Branch(p,params[p],"%s/Double_t"%(p))
 
+def resetVals():
+
+  # set the parameters 
+  it = params.createIterator()
+  for j in range(nparams):
+	p = it.Next()
+	if p==None : break		
+	p.setVal(default_parameter_vals[p.GetName()])
 
 def fillGrid(func,graph,txtfile,tree,c_vals):
 
@@ -71,7 +100,8 @@ def fillGrid(func,graph,txtfile,tree,c_vals):
 	  if nparams == 2: 
 	 	graph.SetPoint(point,val[0],val[1],mu)
 		point+=1
-	  elif abs(config["sliceval"] - val[config["fixparameter"]]) < 0.001 and nparams < 4:
+	  elif options.sliceval:
+	    if abs(config["sliceval"] - val[config["fixparameter"]]) < 0.001 and nparams < 4:
 	 	graph.SetPoint(point,val[config["xparameter"]],val[config["yparameter"]],mu)
 		point+=1
 
@@ -99,7 +129,7 @@ def fillOutputs(func,graph,txtfile,tree):
 def makePlot(name,tgraph):
 
 
-	#if options.sliceval:
+	if not options.sliceval: return 
 	it = params.createIterator()
 	if "xparameter_name" not in config.keys(): 
 	  for pcounter in range(nparams):
@@ -149,7 +179,8 @@ def makePlot(name,tgraph):
 	lvert.Draw()
 	lhorz.Draw()
 	
-	c.SaveAs("%s.pdf"%(name))
+	c.SaveAs("%s/%s.pdf"%(options.out,name))
+	c.SaveAs("%s/%s.png"%(options.out,name))
 	#c.SetLogz()
 	#c.SaveAs("%s_logscale.pdf"%(name))
 
@@ -157,14 +188,17 @@ def produceScan(modelname,extname,proddecaystring,work,energy=""):
 
 	# Get the appropriate mapping 
 	proddecay = proddecaystring+"_%s"%energy
-	name = "%s_%s_%s"%(modelname,extname,proddecay)
-	func = work.function(name)
+	name = "*%s_%s*"%(extname,proddecay)
+	func = work.allFunctions().selectByName(name).first()
+	print "Looking for ", name 
 	if not func: 
 		# mostly modesl will NOT be energy dependant
 	        #proddecay+="_%s"%energy	
 		proddecay = proddecaystring
-		name = "%s_%s_%s"%(modelname,extname,proddecay)
-		func = work.function(name)
+		name = "*%s_%s*"%(extname,proddecay)
+	        print "Nope!, Looking for ", name 
+	 	work.allFunctions().selectByName(name).Print()
+		func = work.allFunctions().selectByName(name).first()
 	if not func: #Give up!
 		return 
 
@@ -187,12 +221,32 @@ def produceScan(modelname,extname,proddecaystring,work,energy=""):
 	createBranches(tr,parameter_vals)
 
 	# This is the loop over points in the model 		
-	fillOutputs(func,tgraph,txtfile,tr)
+	if not options.skipTree: fillOutputs(func,tgraph,txtfile,tr)
 
-	# make a plot 
+	# make a 2D plot 
 	if nparams == 2 or (options.sliceval and nparams <4): makePlot("%s_%s"%(modelname,proddecay),tgraph)
-	else: print "Skipping plots (nparams != 2)"
-	
+	else: print "Skipping 2D plots (nparams != 2, and nparams!=3 with a slice value given)"
+
+	# make 1D scans 
+	it = params.createIterator()
+	allplots = []
+	for j in range(nparams):
+		p = it.Next()
+		if p==None : break		
+	        plot = p.frame()
+		resetVals()
+		func.plotOn(plot)
+		allplots.append(plot)
+
+	cc = ROOT.TCanvas("c_PARAM_%s_%s"%(modelname,proddecay),"",1080,600)
+	if not nparams == 1: cc.Divide((nparams+1)//2,2)
+	for j,p in enumerate(allplots):
+		cc.cd(j+1)
+		p.Draw()
+
+	cc.SaveAs("%s/%s_%s.pdf"%(options.out,modelname,proddecay))
+	cc.SaveAs("%s/%s_%s.png"%(options.out,modelname,proddecay))
+
 	# Write The Tree:
 	tr.Write()
 
@@ -220,6 +274,18 @@ print "Number of parameters in Model: ", nparams
 params.Print()
 
 parameter_vals	= {"mu":array.array('d',[0])}
+
+# create the map of default values 
+default_parameter_vals = {}
+iter = params.createIterator()
+while 1: 
+  p = iter.Next()
+  if p == None: break
+  name = p.GetName()
+  # should ideally sort these out, rather than hard code/set to defaults in the workspace
+  #work.var(name).setMin(-2)
+  #work.var(name).setMax(2)   
+  default_parameter_vals[name] = p.getVal() 
 
 # create a dictionary object which containts name, empty array
 iter = params.createIterator()
@@ -259,27 +325,29 @@ print config
 
 #for p in params: print p.GetName()
 # Output file for ROOT TTrees
-tree_output = ROOT.TFile("%s_trees.root"%options.model,"RECREATE")
-
+tree_output = ROOT.TFile("%s/%s_trees.root"%(options.out,options.model),"RECREATE")
 set_palette(ncontours=255) # For colored plots
 
+"""
 # Simple production x-section and branching ratios
 for decay in decay_modes:
 
 	ext = "BRscal"
 	produceScan(options.model,ext,decay,work)
+"""
 
 # Full Matrix sigma*BR available in Model:
 for prod in production_channels:
    for decay in decay_channels:
 	
-	ext = "XSBRscal"
+	ext = options.scaling_prefix
 	proddecay = "%s_%s"%(prod,decay)
-	if options.energydependant: 
-		for e in energies:
-			produceScan(options.model,ext,proddecay,work,energy=e)
-	else: 
-			produceScan(options.model,ext,proddecay,work)
+	for e in energies:
+	  produceScan(options.model,ext,proddecay,work,energy=e)
+	
+#	if options.energydependant: 
+#	else: 
+#			produceScan(options.model,ext,proddecay,work)
 
 	
 

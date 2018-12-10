@@ -9,7 +9,7 @@
  *
  */
 #include "HiggsAnalysis/CombinedLimit/interface/LimitAlgo.h"
-#include "HiggsAnalysis/CombinedLimit/interface/ProfileLikelihood.h"
+#include "HiggsAnalysis/CombinedLimit/interface/Significance.h"
 
 class TDirectory;
 
@@ -31,9 +31,9 @@ public:
 protected:
   static std::string algo_;
 
-  static std::string minimizerAlgo_;
-  static float       minimizerTolerance_;
-  static int         minimizerStrategy_;
+//  static std::string minimizerAlgo_;
+//  static float       minimizerTolerance_;
+//  static int         minimizerStrategy_;
 
   static float mu_;
   static bool  fixedMu_;
@@ -43,6 +43,8 @@ protected:
   static std::vector<std::string>  binNames_;
   static std::vector<float>        qVals_;
 
+  static std::string setParametersForFit_;
+  static std::string setParametersForEval_;
 
   // Return a pdf that matches this data perfectly.
   RooAbsPdf *makeSaturatedPdf(RooAbsData &data);

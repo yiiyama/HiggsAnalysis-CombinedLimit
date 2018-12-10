@@ -1,7 +1,9 @@
 #ifndef HiggsAnalysis_CombinedLimit_Combine_h
 #define HiggsAnalysis_CombinedLimit_Combine_h
 #include <TString.h>
+#include <TFile.h>
 #include <boost/program_options.hpp>
+#include <boost/filesystem.hpp>
 #include "RooArgSet.h"
 #include "RooAbsReal.h"
 #include <boost/algorithm/string/split.hpp>
@@ -28,7 +30,22 @@ extern float cl;
 extern bool bypassFrequentistFit_;
 extern  std::string setPhysicsModelParameterExpression_;
 extern  std::string setPhysicsModelParameterRangeExpression_;
+extern  std::string defineBackgroundOnlyModelParameterExpression_;
 
+namespace { 
+    struct ToCleanUp {
+        TFile *tfile; std::string file, path;
+        ToCleanUp() : tfile(0), file(""), path("") {}
+        ~ToCleanUp() {
+              if (tfile) { tfile->Close(); delete tfile; }
+              if (!file.empty()) {  
+                 unlink(file.c_str());  // FIXME, we should check that the file deleted safely but currently when running HybridNew, we get a status of -1 even though the file is in fact removed?!
+		 //if (unlink(file.c_str()) == -1) std::cerr << "Failed to delete temporary file " << file << ": " << strerror(errno) << std::endl;
+              }
+              if (!path.empty()) {  boost::filesystem::remove_all(path); }
+        }
+    };
+}
 
 class Combine {
 public:
@@ -57,9 +74,10 @@ private:
   void addPOI(const RooArgSet *);
 
   boost::program_options::options_description statOptions_, ioOptions_, miscOptions_;
- 
+
   // statistics-related variables
   bool unbinned_, generateBinnedWorkaround_, newGen_, guessGenMode_; 
+  std::string genAsBinned_, genAsUnbinned_;
   float rMin_, rMax_;
   std::string prior_;
   bool hintUsesStatOnly_;
@@ -89,13 +107,17 @@ private:
   bool rebuildSimPdf_;
   bool optSimPdf_;
   bool noMCbonly_;
+  bool noDefaultPrior_;
   bool floatAllNuisances_;
   bool freezeAllGlobalObs_;
-
+  std::vector<std::string> librariesToLoad_;
+  std::vector<std::string> modelPoints_;
+  
   static TTree *tree_;
 
   static std::vector<std::pair<RooAbsReal*,float> > trackedParametersMap_;
   static std::string  trackParametersNameString_;
+  static std::string  textToWorkspaceString_;
 
 };
 

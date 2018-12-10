@@ -18,11 +18,15 @@
 #include <RooCategory.h>
 #include <RooStats/ModelConfig.h>
 #include "HiggsAnalysis/CombinedLimit/interface/Combine.h"
-#include "HiggsAnalysis/CombinedLimit/interface/ProfileLikelihood.h"
+#include "HiggsAnalysis/CombinedLimit/interface/Significance.h"
+#include "HiggsAnalysis/CombinedLimit/interface/CascadeMinimizer.h"
 #include "HiggsAnalysis/CombinedLimit/interface/CloseCoutSentry.h"
 #include "HiggsAnalysis/CombinedLimit/interface/RooSimultaneousOpt.h"
 #include "HiggsAnalysis/CombinedLimit/interface/utils.h"
+#include "HiggsAnalysis/CombinedLimit/interface/CachingNLL.h"
+
 #include <numeric>
+#include <memory>
 
 
 #include <Math/MinimizerOptions.h>
@@ -30,24 +34,28 @@
 using namespace RooStats;
 
 std::string GoodnessOfFit::algo_;
-std::string GoodnessOfFit::minimizerAlgo_ = "Minuit2";
-float       GoodnessOfFit::minimizerTolerance_ = 1e-4;
-int         GoodnessOfFit::minimizerStrategy_  = 1;
+//std::string GoodnessOfFit::minimizerAlgo_ = "Minuit2";
+//float       GoodnessOfFit::minimizerTolerance_ = 1e-4;
+//int         GoodnessOfFit::minimizerStrategy_  = 1;
 float       GoodnessOfFit::mu_ = 0.0;
 bool        GoodnessOfFit::fixedMu_ = false;
 bool        GoodnessOfFit::makePlots_ = false;
 TDirectory* GoodnessOfFit::plotDir_ = nullptr;
 std::vector<std::string>  GoodnessOfFit::binNames_;
 std::vector<float>        GoodnessOfFit::qVals_;
+std::string GoodnessOfFit::setParametersForFit_ = "";
+std::string GoodnessOfFit::setParametersForEval_ = "";
 
 GoodnessOfFit::GoodnessOfFit() :
     LimitAlgo("GoodnessOfFit specific options")
 {
     options_.add_options()
         ("algorithm",          boost::program_options::value<std::string>(&algo_), "Goodness of fit algorithm. Supported algorithms are 'saturated', 'KS' and 'AD'.")
-        ("minimizerAlgo",      boost::program_options::value<std::string>(&minimizerAlgo_)->default_value(minimizerAlgo_), "Choice of minimizer (Minuit vs Minuit2)")
-        ("minimizerTolerance", boost::program_options::value<float>(&minimizerTolerance_)->default_value(minimizerTolerance_),  "Tolerance for minimizer")
-        ("minimizerStrategy",  boost::program_options::value<int>(&minimizerStrategy_)->default_value(minimizerStrategy_),      "Stragegy for minimizer")
+        ("setParametersForFit",   boost::program_options::value<std::string>(&setParametersForFit_)->default_value(""), "Set parameters values for the saturated model fitting step")
+        ("setParametersForEval",   boost::program_options::value<std::string>(&setParametersForEval_)->default_value(""), "Set parameter values for the saturated model NLL eval step")
+  //      ("minimizerAlgo",      boost::program_options::value<std::string>(&minimizerAlgo_)->default_value(minimizerAlgo_), "Choice of minimizer (Minuit vs Minuit2)")
+  //      ("minimizerTolerance", boost::program_options::value<float>(&minimizerTolerance_)->default_value(minimizerTolerance_),  "Tolerance for minimizer")
+  //      ("minimizerStrategy",  boost::program_options::value<int>(&minimizerStrategy_)->default_value(minimizerStrategy_),      "Stragegy for minimizer")
         ("fixedSignalStrength", boost::program_options::value<float>(&mu_)->default_value(mu_),  "Compute the goodness of fit for a fixed signal strength. If not specified, it's left floating")
         ("plots",  "Make plots containing information of the computation of the Anderson-Darling or Kolmogorov-Smirnov test statistic")
     ;
@@ -69,7 +77,9 @@ void GoodnessOfFit::applyOptions(const boost::program_options::variables_map &vm
 }
 
 bool GoodnessOfFit::run(RooWorkspace *w, RooStats::ModelConfig *mc_s, RooStats::ModelConfig *mc_b, RooAbsData &data, double &limit, double &limitErr, const double *hint) { 
-  ProfileLikelihood::MinimizerSentry minimizerConfig(minimizerAlgo_, minimizerTolerance_);
+  //double minimizerTolerance_  = ROOT::Math::MinimizerOptions::DefaultTolerance();
+  //std::string minimizerAlgo_       = ROOT::Math::MinimizerOptions::DefaultMinimizerAlgo();
+  //Significance::MinimizerSentry minimizerConfig(minimizerAlgo_, minimizerTolerance_);
 
   RooRealVar *r = dynamic_cast<RooRealVar *>(mc_s->GetParametersOfInterest()->first());
   if (fixedMu_) { r->setVal(mu_); r->setConstant(true); }
@@ -129,7 +139,9 @@ bool GoodnessOfFit::runSaturatedModel(RooWorkspace *w, RooStats::ModelConfig *mc
           if (pdfi == 0) continue;
           RooAbsData *datai = (RooAbsData *) datasets->FindObject(cat->getLabel());
           if (datai == 0) throw std::runtime_error(std::string("Error: missing dataset for category label ")+cat->getLabel());
-          RooAbsPdf *saturatedPdfi = makeSaturatedPdf(*datai);
+          std::unique_ptr<RooArgSet> data_observables(pdfi->getObservables(datai));
+          std::unique_ptr<RooAbsData> data_reduced(datai->reduce(*data_observables));
+          RooAbsPdf *saturatedPdfi = makeSaturatedPdf(*data_reduced);
           //delete datai;
           if (constraints.getSize() > 0) {
             RooArgList terms(constraints); terms.add(*saturatedPdfi);
@@ -139,6 +151,12 @@ bool GoodnessOfFit::runSaturatedModel(RooWorkspace *w, RooStats::ModelConfig *mc
           }
           satsim->addPdf(*saturatedPdfi, cat->getLabel());
           satsim->addOwnedComponents(RooArgSet(*saturatedPdfi));
+      }
+      // Transfer the channel masks manually
+      RooSimultaneousOpt* satsimopt = dynamic_cast<RooSimultaneousOpt*>(satsim);
+      RooSimultaneousOpt* simopt = dynamic_cast<RooSimultaneousOpt*>(pdf_nominal);
+      if (satsimopt && simopt) {
+        satsimopt->addChannelMasks(simopt->channelMasks());
       }
       saturated.reset(satsim);
   } else {
@@ -153,22 +171,50 @@ bool GoodnessOfFit::runSaturatedModel(RooWorkspace *w, RooStats::ModelConfig *mc
   }
 
   CloseCoutSentry sentry(verbose < 2);
-  // let's assume fits converge, for a while
-  const RooCmdArg &minim = RooFit::Minimizer(ROOT::Math::MinimizerOptions::DefaultMinimizerType().c_str(),
-                                             ROOT::Math::MinimizerOptions::DefaultMinimizerAlgo().c_str());
-  std::auto_ptr<RooFitResult> result_nominal(pdf_nominal->fitTo(data, RooFit::Save(1), minim, RooFit::Strategy(minimizerStrategy_), RooFit::Hesse(0), RooFit::Constrain(*mc_s->GetNuisanceParameters())));
-  std::auto_ptr<RooFitResult> result_saturated(saturated->fitTo(data, RooFit::Save(1), minim, RooFit::Strategy(minimizerStrategy_), RooFit::Hesse(0), RooFit::Constrain(*mc_s->GetNuisanceParameters())));
+
+  const RooCmdArg &constrainCmdArg = withSystematics  ? RooFit::Constrain(*mc_s->GetNuisanceParameters()) : RooCmdArg();
+  std::auto_ptr<RooAbsReal> nominal_nll(pdf_nominal->createNLL(data, constrainCmdArg));
+  std::auto_ptr<RooAbsReal> saturated_nll(saturated->createNLL(data, constrainCmdArg));
+
+  if (setParametersForFit_ != "") {
+    utils::setModelParameters(setParametersForFit_, w->allVars());
+  }
+  CascadeMinimizer minimn(*nominal_nll, CascadeMinimizer::Unconstrained);
+ // minimn.setStrategy(minimizerStrategy_);
+  minimn.minimize(verbose-2);
+  // This test is a special case where we are comparing the likelihoods of two
+  // different models and so we can't re-zero the NLL with respect to the
+  // initial parameters.
+  if (dynamic_cast<cacheutils::CachingSimNLL*>(nominal_nll.get())) {
+    static_cast<cacheutils::CachingSimNLL*>(nominal_nll.get())->clearConstantZeroPoint();
+  }
+
+  if (setParametersForEval_ != "") {
+    utils::setModelParameters(setParametersForEval_, w->allVars());
+  }
+  double nll_nominal = nominal_nll->getVal();
+
+  if (setParametersForFit_ != "") {
+    utils::setModelParameters(setParametersForFit_, w->allVars());
+  }
+  CascadeMinimizer minims(*saturated_nll, CascadeMinimizer::Unconstrained);
+  //minims.setStrategy(minimizerStrategy_);
+  minims.minimize(verbose-2);
+  if (dynamic_cast<cacheutils::CachingSimNLL*>(saturated_nll.get())) {
+    static_cast<cacheutils::CachingSimNLL*>(saturated_nll.get())->clearConstantZeroPoint();
+  }
+
+  if (setParametersForEval_ != "") {
+    utils::setModelParameters(setParametersForEval_, w->allVars());
+  }
+  double nll_saturated = saturated_nll->getVal();
+
   sentry.clear();
 
   saturated.reset();
   for (int i = 0, n = tempData_.size(); i < n; ++i) delete tempData_[i]; 
   tempData_.clear();
 
-  if (result_nominal.get()   == 0) return false;
-  if (result_saturated.get() == 0) return false;
-
-  double nll_nominal   = result_nominal->minNll();
-  double nll_saturated = result_saturated->minNll();
   if (fabs(nll_nominal) > 1e10 || fabs(nll_saturated) > 1e10) return false;
   limit = 2*(nll_nominal-nll_saturated);
 
@@ -187,9 +233,22 @@ bool GoodnessOfFit::runKSandAD(RooWorkspace *w, RooStats::ModelConfig *mc_s, Roo
 
   //First, find the best fit values
   CloseCoutSentry sentry(verbose < 2);
+  
+  /*
   const RooCmdArg &minim = RooFit::Minimizer(ROOT::Math::MinimizerOptions::DefaultMinimizerType().c_str(),
                                              ROOT::Math::MinimizerOptions::DefaultMinimizerAlgo().c_str());
+  int minimizerStrategy_  = ROOT::Math::MinimizerOptions::DefaultStrategy();
+
   std::auto_ptr<RooFitResult> result(pdf->fitTo(data, RooFit::Save(1), minim, RooFit::Strategy(minimizerStrategy_), RooFit::Hesse(0), RooFit::Constrain(*mc_s->GetNuisanceParameters())));
+  sentry.clear();
+  */
+
+  const RooCmdArg &constrainCmdArg = withSystematics  ? RooFit::Constrain(*mc_s->GetNuisanceParameters()) : RooCmdArg();
+  std::auto_ptr<RooAbsReal> nll(pdf->createNLL(data, constrainCmdArg));
+  CascadeMinimizer minim(*nll, CascadeMinimizer::Unconstrained);
+  //minims.setStrategy(minimizerStrategy_);
+  minim.minimize(verbose-2);
+
   sentry.clear();
 
   RooSimultaneous *sim = dynamic_cast<RooSimultaneous *>(obsOnlyPdf);
@@ -269,8 +328,7 @@ Double_t GoodnessOfFit::EvaluateADDistance(RooAbsPdf& pdf, RooAbsData& data, Roo
     // CDF of the PDF
     // If RooFit needs to use the scanning technique then increase the number
     // of sampled bins from 1000 to 10000
-    std::auto_ptr<RooAbsReal> cdf(pdf.createCdf(observable, RooFit::ScanParameters(10000, 2)));
-
+    std::auto_ptr<RooAbsReal> cdf(pdf.createCdf(observable, RooFit::ScanAllCdf(), RooFit::ScanParameters(10000, 2)));
     TH1 * hCdf = nullptr;
     TH1 * hEdf = nullptr;
     TH1 * hDiff = nullptr;

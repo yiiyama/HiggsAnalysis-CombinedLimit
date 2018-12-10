@@ -9,7 +9,7 @@
  *
  */
 #include "HiggsAnalysis/CombinedLimit/interface/LimitAlgo.h"
-#include "HiggsAnalysis/CombinedLimit/interface/ProfileLikelihood.h"
+#include "HiggsAnalysis/CombinedLimit/interface/Significance.h"
 class RooFitResult;
 class RooMinimizer;
 class RooCmdArg;
@@ -28,9 +28,13 @@ public:
   virtual bool run(RooWorkspace *w, RooStats::ModelConfig *mc_s, RooStats::ModelConfig *mc_b, RooAbsData &data, double &limit, double &limitErr, const double *hint);
 
 protected:
-  static std::string minimizerAlgo_, minimizerAlgoForMinos_;
-  static float       minimizerTolerance_, minimizerToleranceForMinos_;
-  static int         minimizerStrategy_, minimizerStrategyForMinos_;
+  //static std::string minimizerAlgo_, 
+  static std::string minimizerAlgoForMinos_;
+  //static float       minimizerTolerance_, 
+  static float 	     minimizerToleranceForMinos_;
+  static float 	     crossingTolerance_;
+  //static int         minimizerStrategy_, 
+  static int 	     minimizerStrategyForMinos_;
 
   static float preFitValue_;
 
@@ -43,6 +47,8 @@ protected:
   RooArgSet parametersToFreeze_;
 
   static bool  saveNLL_, keepFailures_, protectUnbinnedChannels_;
+  static std::string autoBoundsPOIs_, autoMaxPOIs_;
+  RooArgSet autoBoundsPOISet_, autoMaxPOISet_;
   static double nllValue_, nll0Value_;
   std::auto_ptr<RooAbsReal> nll;
   // method that is implemented in the subclass

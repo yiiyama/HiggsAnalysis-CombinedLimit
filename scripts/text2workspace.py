@@ -7,6 +7,7 @@ from optparse import OptionParser
 argv.append( '-b-' )
 import ROOT
 ROOT.gROOT.SetBatch(True)
+ROOT.PyConfig.IgnoreCommandLineOptions = True
 argv.remove( '-b-' )
 
 from HiggsAnalysis.CombinedLimit.DatacardParser import *
@@ -18,6 +19,7 @@ parser = OptionParser(usage="usage: %prog [options] datacard.txt -o output \nrun
 addDatacardParserOptions(parser)
 parser.add_option("-P", "--physics-model", dest="physModel", default="HiggsAnalysis.CombinedLimit.PhysicsModel:defaultModel",  type="string", help="Physics model to use. It should be in the form (module name):(object name)")
 parser.add_option("--PO", "--physics-option", dest="physOpt", default=[],  type="string", action="append", help="Pass a given option to the physics model (can specify multiple times)")
+parser.add_option("", "--dump-datacard", dest="dumpCard", default=False, action='store_true',  help="Print to screen the DataCard as a python config and exit")
 (options, args) = parser.parse_args()
 
 if len(args) == 0:
@@ -35,6 +37,10 @@ else:
 ## Parse text file 
 DC = parseCard(file, options)
 
+if options.dumpCard:
+    DC.print_structure()
+    exit()
+
 ## Load tools to build workspace
 MB = None
 if DC.hasShapes:
@@ -48,8 +54,8 @@ __import__(physModMod)
 mod = modules[physModMod]
 physics = getattr(mod, physModName)
 if mod     == None: raise RuntimeError, "Physics model module %s not found" % physModMod
-if physics == None or not isinstance(physics, PhysicsModel): 
-    raise RuntimeError, "Physics model %s in module %s not found, or not inheriting from PhysicsModel" % (physModName, physModMod)
+if physics == None or not isinstance(physics, PhysicsModelBase): 
+    raise RuntimeError, "Physics model %s in module %s not found, or not inheriting from PhysicsModelBase" % (physModName, physModMod)
 physics.setPhysicsOptions(options.physOpt)
 ## Attach to the tools, and run
 MB.setPhysics(physics)
