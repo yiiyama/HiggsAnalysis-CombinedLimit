@@ -223,8 +223,8 @@ for chan in chans:
         sumw2_chan_hist.Delete()
       else:
         print("fallback uncertainties")
-        nentries_chan = (norm_chan_hist.GetEntries()/norm_chan_hist.GetSumOfWeights())*normchan
-        sumw2_chan = nentries_chan*np.square(normchan/nentries_chan)
+        nentries_chan = (norm_chan_hist.GetEntries()/norm_chan_hist.GetSumOfWeights())*norm_chan
+        sumw2_chan = nentries_chan*np.square(norm_chan/nentries_chan)
         nentries_chan = None
     norm_chan_hist.Delete()
     
