@@ -38,6 +38,7 @@ from array import array
 from HiggsAnalysis.CombinedLimit.tfscipyhess import ScipyTROptimizerInterface,jacobian,sum_loop
 
 parser = OptionParser(usage="usage: %prog [options] datacard.txt -o output \nrun with --help to get list of options")
+parser.add_option("-o","--output", default=None, type="string", help="output file name")
 parser.add_option("-t","--toys", default=0, type=int, help="run a given number of toys, 0 fits the data (default), and -1 fits the asimov toy")
 parser.add_option("","--toysFrequentist", default=True, action='store_true', help="run frequentist-type toys by randomizing constraint minima")
 parser.add_option("","--bypassFrequentistFit", default=True, action='store_true', help="bypass fit to data when running frequentist toys to get toys based on prefit expectations")
@@ -574,7 +575,7 @@ if options.binByBinStat:
   bayesassignbeta = tf.assign(betagen, tf.random_gamma(shape=[],alpha=kstat+1.,beta=kstat,dtype=tf.as_dtype(dtype)))
 
 #initialize output tree
-f = ROOT.TFile( 'fitresults_%i.root' % seed, 'recreate' )
+f = ROOT.TFile(options.output if options.output else 'fitresults_%i.root' % seed, 'recreate' )
 tree = ROOT.TTree("fitresults", "fitresults")
 
 tseed = array('i', [seed])
