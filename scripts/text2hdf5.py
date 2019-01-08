@@ -218,7 +218,14 @@ for chan in chans:
       if (norm_chan_hist.GetSumw2().GetSize()>0):
         print("proper uncertainties")
         sumw2_chan_hist = norm_chan_hist.Clone()
-        sumw2_chan_hist.Set(sumw2_chan_hist.GetSumw2().GetSize(), sumw2_chan_hist.GetSumw2().GetArray())
+        try:
+            sumw2_chan_hist.Set(sumw2_chan_hist.GetSumw2().GetSize(), sumw2_chan_hist.GetSumw2().GetArray())
+        except:
+            #in ROOT v6.12/07  set expects an array of floats not a TArrayD
+            from array import array
+            sumw2f=[sumw2_chan_hist.GetSumw2()[i] for i in range(sumw2_chan_hist.GetSumw2().GetSize())]
+            sumw2f = array('f',sumw2f)
+            sumw2_chan_hist.Set(sumw2_chan_hist.GetSumw2().GetSize(), sumw2f)
         sumw2_chan = hist2array(sumw2_chan_hist, include_overflow=False).astype(dtype)
         sumw2_chan_hist.Delete()
       else:
