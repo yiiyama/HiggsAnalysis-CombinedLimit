@@ -11,6 +11,7 @@ parser = OptionParser(
 parser.add_option("-s", "--stat",   dest="stat",          default=False, action="store_true", help="Drop all systematics")
 parser.add_option("-S", "--force-shape", dest="shape",    default=False, action="store_true", help="Treat all channels as shape analysis. Useful for mixed combinations")
 parser.add_option("-a", "--asimov", dest="asimov",  default=False, action="store_true", help="Replace observation with asimov dataset. Works only for counting experiments")
+parser.add_option(      "--noDirPrefix", dest="noDirPrefix",  default=False, action="store_true", help="Do not attempt to dirname of the orignal datacard to shapes file")
 parser.add_option("-P", "--prefix", type="string", dest="fprefix", default="",  help="Prefix this to all file names")
 parser.add_option("--xc", "--exclude-channel", type="string", dest="channelVetos", default=[], action="append", help="Exclude channels that match this regexp; can specify multiple ones")
 parser.add_option("--ic", "--include-channel", type="string", dest="channelIncludes", default=[], action="append", help="Only include channels that match this regexp; can specify multiple ones")
@@ -147,12 +148,12 @@ for ich,fname in enumerate(args):
             p2sMapD = DC.shapeMap['*'] if DC.shapeMap.has_key('*') else {}
             for p, x in p2sMap.items():
                 xrep = [xi.replace("$CHANNEL",b) for xi in x]
-                if xrep[0] != 'FAKE' and dirname != '': xrep[0] = dirname+"/"+xrep[0]
+                if xrep[0] != 'FAKE' and dirname != '' and not options.noDirPrefix: xrep[0] = dirname+"/"+xrep[0]
                 shapeLines.append((p,bout,xrep))
             for p, x in p2sMapD.items():
                 if p2sMap.has_key(p): continue
                 xrep = [xi.replace("$CHANNEL",b) for xi in x]
-                if xrep[0] != 'FAKE' and dirname != '': xrep[0] = dirname+"/"+xrep[0]
+                if xrep[0] != 'FAKE' and dirname != '' and not options.noDirPrefix: xrep[0] = dirname+"/"+xrep[0]
                 shapeLines.append((p,bout,xrep))
     elif options.shape:
         for b in DC.bins:
