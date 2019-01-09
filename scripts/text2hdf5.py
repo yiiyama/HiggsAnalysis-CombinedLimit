@@ -218,13 +218,20 @@ for chan in chans:
       if (norm_chan_hist.GetSumw2().GetSize()>0):
         print("proper uncertainties")
         sumw2_chan_hist = norm_chan_hist.Clone()
-        sumw2_chan_hist.Set(sumw2_chan_hist.GetSumw2().GetSize(), sumw2_chan_hist.GetSumw2().GetArray())
+        if sumw2_chan_hist.InheritsFrom('TH1F'):
+            #work around for the fact GetSumw2 returns a TArrayD but TH1F expects a Float_t *
+            from array import array
+            sumw2f=[sumw2_chan_hist.GetSumw2()[i] for i in range(sumw2_chan_hist.GetSumw2().GetSize())]
+            sumw2f = array('f',sumw2f)
+            sumw2_chan_hist.Set(sumw2_chan_hist.GetSumw2().GetSize(), sumw2f)
+        else:
+            sumw2_chan_hist.Set(sumw2_chan_hist.GetSumw2().GetSize(), sumw2_chan_hist.GetSumw2().GetArray())
         sumw2_chan = hist2array(sumw2_chan_hist, include_overflow=False).astype(dtype)
         sumw2_chan_hist.Delete()
       else:
         print("fallback uncertainties")
-        nentries_chan = (norm_chan_hist.GetEntries()/norm_chan_hist.GetSumOfWeights())*normchan
-        sumw2_chan = nentries_chan*np.square(normchan/nentries_chan)
+        nentries_chan = (norm_chan_hist.GetEntries()/norm_chan_hist.GetSumOfWeights())*norm_chan
+        sumw2_chan = nentries_chan*np.square(norm_chan/nentries_chan)
         nentries_chan = None
     norm_chan_hist.Delete()
     
