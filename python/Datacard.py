@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 class Datacard():
     """
     Description:
@@ -50,6 +52,8 @@ class Datacard():
         
 	self.groups = {}
 	self.discretes = []
+	
+	self.chargeGroups = OrderedDict()
 
     def print_structure(self):
 	"""
@@ -94,6 +98,7 @@ MB = None
   	print "DC.binParFlags 	= "	  	, self.binParFlags        	,"#",type(self.binParFlags)	
 	print "DC.groups 	= "		, self.groups        		,"#",type(self.groups)	
 	print "DC.discretes 	= "		, self.discretes        	,"#",type(self.discretes)	
+	print "DC.chargeGroups 	= "		, self.chargeGroups        	,"#",type(self.chargeGroups)	
 
 	print """
 

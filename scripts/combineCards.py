@@ -4,6 +4,7 @@ from sys import argv
 import os.path
 from pprint import pprint
 from optparse import OptionParser
+from collections import OrderdDict
 parser = OptionParser(
     usage="%prog [options] [label=datacard.txt | datacard.txt]",
     epilog="The label=datacard.txt syntax allows to specify the label that channels from datacard.txt will have in the combined datacard. To combine cards with different energies one can use dc_7TeV=datacard7.txt dc_8TeV=datacard8.txt (avoid using labels starting with numbers)."
@@ -36,7 +37,7 @@ from HiggsAnalysis.CombinedLimit.DatacardParser import *
 obsline = []; obskeyline = [] ;
 keyline = []; expline = []; systlines = {}
 signals = []; backgrounds = []; shapeLines = []
-paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {}; rateParamsOrder = set();
+paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {}; rateParamsOrder = set(); chargeGroups = collections.OrderedDict()
 extArgs = {}; binParFlags = {}
 nuisanceEdits = [];
 
@@ -175,6 +176,15 @@ for ich,fname in enumerate(args):
             groups[groupName].update(set(nuisanceNames))
         else:
             groups[groupName] = set(nuisanceNames)
+            
+    for groupName,procNames in DC.chargeGroups.iteritems():
+        if groupName in chargeGroups:
+            if chargeGroups[groupName] == procNames:
+                continue
+            else:
+                raise RuntimeError, "Conflicting definition of chargeGroup %s" % groupName
+        else:
+            chargeGroups[groupName] = procNames            
 
     # Finally report nuisance edits propagated to end of card
     for editline in DC.nuisanceEditLines:

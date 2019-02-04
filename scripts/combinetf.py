@@ -85,7 +85,12 @@ signals = f['hsignals'][...]
 systs = f['hsysts'][...]
 systgroups = f['hsystgroups'][...]
 systgroupidxs = f['hsystgroupidxs'][...]
+chargegroups = f['hchargegroups'][...]
+chargegroupidxs = f['hchargegroupidxs'][...]
 maskedchans = f['hmaskedchans'][...]
+
+print(chargegroups)
+print(chargegroupidxs)
 
 #load arrays from file
 hdata_obs = f['hdata_obs']
@@ -108,6 +113,7 @@ nproc = len(procs)
 nsyst = len(systs)
 nsignals = len(signals)
 nsystgroups = len(systgroups)
+nchargegroups = len(chargegroups)
 
 systgroupsfull = systgroups.tolist()
 systgroupsfull.append("stat")
@@ -325,6 +331,8 @@ pmaskedexpnorm = tf.squeeze(pmaskedexpnorm,0)
 pmaskedexpnorm = r*pmaskedexpnorm
 
   
+
+  
 if options.saveHists:
   nexpsigcentral = tf.reduce_sum(normfullcentral[:,:nsignals],axis=-1)
   nexpbkgcentral = tf.reduce_sum(normfullcentral[:,nsignals:],axis=-1)
@@ -379,6 +387,24 @@ outputs.append(poi)
 if nbinsmasked>0:
   outputs.append(pmaskedexp)
   outputs.append(pmaskedexpnorm)
+  
+#charge asymmetries if defined
+if nchargegroups > 0:  
+  #build matrix of cross sections
+  chargegroupxsecs = tf.reshape(tf.gather(pmaskedexp, tf.reshape(chargegroupidxs,[-1])),chargegroupidxs.shape)
+  
+  #total xsec = sigma_+ + sigma_-
+  chargetotals = tf.reduce_sum(chargegroupxsecs,axis=-1)
+  
+  #charge asym = (sigma_+ - sigma_-)/(sigma_+ + sigma_-)
+  mcharges = tf.constant([[1.],[-1.]],dtype=dtype)
+  mchargediffs = tf.matmul(chargegroupxsecs,mcharges)
+  chargediffs = tf.reshape(mchargediffs,[-1])
+  chargeasyms = chargediffs/chargetotals
+  
+  chargepois = tf.concat([chargeasyms,chargetotals],axis=0)
+  chargepois = tf.identity(chargepois,"chargepois")
+  outputs.append(chargepois)
 
 nthreadshess = options.nThreads
 if nthreadshess<0:

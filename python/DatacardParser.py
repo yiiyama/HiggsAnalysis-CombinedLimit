@@ -256,6 +256,29 @@ def parseCard(file, options):
                         ret.groups[groupName].update( set(groupNuisances) )
                     else:
                         raise RuntimeError, "Will not redefine group '%s'. It previously contained '%s' and you now wanted it to contain '%s'." % (groupName,ret.groups[groupName],groupNuisances)
+                      
+                continue
+                      
+            elif pdf=="chargeGroup":
+                # This is not really a pdf type, but a way to be able to group processes together
+                groupName = lsyst
+                groupProcs = numbers
+
+                if not groupProcs:
+                    raise RuntimeError, "Syntax error for group '%s': empty line after 'group'." % groupName
+
+                defToks = ('=')
+                defTok = groupProcs.pop(0)
+                if defTok not in defToks:
+                    raise RuntimeError, "Syntax error for chargeGroup '%s': first thing after 'chargeGroup' is not '=' but '%s'." % (groupName,defTok)
+
+                if groupName not in ret.chargeGroups:
+                    if defTok=='=':
+                        ret.chargeGroups[groupName] = list(groupProcs)
+                    else:
+                        raise RuntimeError, "Cannot append to group '%s' as it was not yet defined." % groupName
+                else:
+                    raise RuntimeError, "Will not redefine group '%s'. It previously contained '%s' and you now wanted it to contain '%s'." % (groupName,ret.chargeGroups[groupName],groupProcs)
 
                 continue
 	    elif pdf=="autoMCStats":

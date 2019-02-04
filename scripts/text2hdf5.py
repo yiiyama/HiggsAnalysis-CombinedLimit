@@ -59,6 +59,8 @@ else:
 ## Parse text file 
 DC = parseCard(file, options)
 
+print(DC.chargeGroups)
+
 if options.dumpCard:
     DC.print_structure()
     exit()
@@ -105,6 +107,16 @@ for group in DC.groups:
   for syst in DC.groups[group]:
     systgroupidx.append(systs.index(syst))
   systgroupidxs.append(systgroupidx)
+    
+#list of groups of signal processes by charge
+chargegroups = []
+chargegroupidxs = []
+for group in DC.chargeGroups:
+  chargegroups.append(group)
+  chargegroupidx = []
+  for proc in DC.chargeGroups[group]:
+    chargegroupidx.append(procs.index(proc))
+  chargegroupidxs.append(chargegroupidx)
     
 #list of channels, ordered such that masked channels are last
 chans = []
@@ -471,6 +483,12 @@ hsystgroups[...] = systgroups
 
 hsystgroupidxs = f.create_dataset("hsystgroupidxs", [len(systgroupidxs)], dtype=h5py.special_dtype(vlen=np.dtype('int32')), compression="gzip")
 hsystgroupidxs[...] = systgroupidxs
+
+hchargegroups = f.create_dataset("hchargegroups", [len(chargegroups)], dtype=h5py.special_dtype(vlen=str), compression="gzip")
+hchargegroups[...] = chargegroups
+
+hchargegroupidxs = f.create_dataset("hchargegroupidxs", [len(chargegroups),2], dtype='int32', compression="gzip")
+hchargegroupidxs[...] = chargegroupidxs
 
 hmaskedchans = f.create_dataset("hmaskedchans", [len(maskedchans)], dtype=h5py.special_dtype(vlen=str), compression="gzip")
 hmaskedchans[...] = maskedchans
