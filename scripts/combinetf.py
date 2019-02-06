@@ -89,9 +89,6 @@ chargegroups = f['hchargegroups'][...]
 chargegroupidxs = f['hchargegroupidxs'][...]
 maskedchans = f['hmaskedchans'][...]
 
-print(chargegroups)
-print(chargegroupidxs)
-
 #load arrays from file
 hdata_obs = f['hdata_obs']
 sparse = not 'hnorm' in f
@@ -382,11 +379,29 @@ pmaskedexp = tf.identity(pmaskedexp, "pmaskedexp")
 pmaskedexpnorm = tf.identity(pmaskedexpnorm, "pmaskedexpnorm")
  
 outputs = []
+outputnames = []
 
 outputs.append(poi)
+
+outputname = []
+for signal in signals:
+  outputname.append("%s_%s" % (signal,options.POIMode))
+outputnames.append(outputname)
+  
+  
 if nbinsmasked>0:
   outputs.append(pmaskedexp)
   outputs.append(pmaskedexpnorm)
+  
+  outputname = []
+  for signal in signals:
+    outputname.append("%s_pmaskedexp" % signal)
+  outputnames.append(outputname)
+
+  outputname = []
+  for signal in signals:
+    outputname.append("%s_pmaskedexpnorm" % signal)
+  outputnames.append(outputname)
   
 #charge asymmetries if defined
 if nchargegroups > 0:  
@@ -405,6 +420,14 @@ if nchargegroups > 0:
   chargepois = tf.concat([chargeasyms,chargetotals],axis=0)
   chargepois = tf.identity(chargepois,"chargepois")
   outputs.append(chargepois)
+  
+  outputname = []
+  for group in chargegroups:
+    outputname.append("%s_chargeasym" % group)
+  for group in chargegroups:
+    outputname.append("%s_totalxsec" % group)
+  
+  outputnames.append(outputname)
 
 nthreadshess = options.nThreads
 if nthreadshess<0:
@@ -563,26 +586,29 @@ tfminimizer = SR1TrustExact(l,x,grad)
 opinit = tfminimizer.initialize(l,x,grad,hessian)
 opmin = tfminimizer.minimize(l,x,grad)
 
-scanvars = {}
-scannames = []
-scanvars["x"] = x
-scannames.append("x")
+outidxmap = {}
+outsubidxmap = {}
+for idx,outputname in enumerate(outputnames):
+  for subidx,name in enumerate(outputname):
+    outidxmap[name] = idx
+    outsubidxmap[name] = subidx
+
+scanvars = []
+scanvars.append(x)
 for output in outputs:
   outname = ":".join(output.name.split(":")[:-1])
   outputtheta = tf.concat([output,theta],axis=0)
-  scanvars[outname] = outputtheta
-  scannames.append(outname)
+  scanvars.append(outputtheta)
 
-scanminimizers = {}
-minosminimizers = {}
-for scanname in scannames:
-  scanvar = scanvars[scanname]
+scanminimizers = []
+minosminimizers = []
+for scanvar in scanvars:
   errproj = -tf.reduce_sum((scanvar-x0)*errdir,axis=0)
   dxconstraint = a + errproj
   scanminimizer = ScipyTROptimizerInterface(l, var_list = [x], var_to_bounds={x: (lb,ub)},  equalities=[dxconstraint], options={'verbose': options.fitverbose, 'maxiter' : 100000, 'gtol' : 0., 'xtol' : xtol, 'barrier_tol' : btol})
   minosminimizer = ScipyTROptimizerInterface(errproj, var_list = [x], var_to_bounds={x: (lb,ub)},  equalities=[dlconstraint], options={'verbose': options.fitverbose, 'maxiter' : 100000, 'gtol' : 0., 'xtol' : xtol, 'barrier_tol' : btol})
-  scanminimizers[scanname] = scanminimizer
-  minosminimizers[scanname] = minosminimizer
+  scanminimizers.append(scanminimizer)
+  minosminimizers.append(minosminimizer)
 
 globalinit = tf.global_variables_initializer()
 nexpnomassign = tf.assign(nexpnom,nexpcentral)
@@ -648,12 +674,12 @@ touterrss = []
 toutminosupss = []
 toutminosdownss = []
 toutgenvalss = []
-outnames = []
-outidxs = {}
-for iout,output in enumerate(outputs):
-  outname = ":".join(output.name.split(":")[:-1])
-  outnames.append(outname)
-  outidxs[outname] = iout
+#outnames = []
+#outidxs = {}
+for output,outputname in zip(outputs,outputnames):
+  #outname = ":".join(output.name.split(":")[:-1])
+  #outnames.append(outname)
+  #outidxs[outname] = iout
   
   toutvals = []
   touterrs = []
@@ -667,7 +693,7 @@ for iout,output in enumerate(outputs):
   toutminosdownss.append(toutminosdowns)
   toutgenvalss.append(toutgenvals)
     
-  for poi in pois:
+  for name in outputname:
     toutval = array('f', [0.])
     touterr = array('f', [0.])
     toutminosup = array('f', [0.])
@@ -678,12 +704,12 @@ for iout,output in enumerate(outputs):
     toutminosups.append(toutminosup)
     toutminosdowns.append(toutminosdown)
     toutgenvals.append(toutgenval)
-    basename = "%s_%s" % (poi,outname)
-    tree.Branch(basename, toutval, '%s/F' % basename)
-    tree.Branch('%s_err' % basename, touterr, '%s_err/F' % basename)
-    tree.Branch('%s_minosup' % basename, toutminosup, '%s_minosup/F' % basename)
-    tree.Branch('%s_minosdown' % basename, toutminosdown, '%s_minosdown/F' % basename)
-    tree.Branch('%s_gen' % basename, toutgenval, '%s_gen/F' % basename)
+    #basename = "%s_%s" % (poi,outname)
+    tree.Branch(name, toutval, '%s/F' % name)
+    tree.Branch('%s_err' % name, touterr, '%s_err/F' % name)
+    tree.Branch('%s_minosup' % name, toutminosup, '%s_minosup/F' % name)
+    tree.Branch('%s_minosdown' % name, toutminosdown, '%s_minosdown/F' % name)
+    tree.Branch('%s_gen' % name, toutgenval, '%s_gen/F' % name)
 
 tthetavals = []
 ttheta0vals = []
@@ -925,7 +951,7 @@ for itoy in range(ntoys):
   #list of hists to prevent garbage collection
   hists = []
 
-  for output, outvals,invhessoutval in zip(outputs, outvalss,invhessoutvals):
+  for output, outputname, outvals,invhessoutval in zip(outputs, outputnames, outvalss,invhessoutvals):
     outname = ":".join(output.name.split(":")[:-1])    
 
     if not options.toys > 0:
@@ -936,9 +962,11 @@ for itoy in range(ntoys):
 
       hists.append(correlationHist)
       hists.append(covarianceHist)
+      
+      outthetanames = outputname + systs.tolist()
 
       #set labels
-      for ip1, p1 in enumerate(parms):
+      for ip1, p1 in enumerate(outthetanames):
         correlationHist.GetXaxis().SetBinLabel(ip1+1, '%s' % p1)
         correlationHist.GetYaxis().SetBinLabel(ip1+1, '%s' % p1)
         covarianceHist.GetXaxis().SetBinLabel(ip1+1, '%s' % p1)
@@ -996,25 +1024,21 @@ for itoy in range(ntoys):
   for var in options.minos:
     print("running minos-like algorithm for %s" % var)
     if var in systs:
-      erroutidx = systs.index(var)
+      erroutidx = systs.tolist().index(var)
       erridx = npoi + erroutidx
       minoserrsup = thetaminosups
       minoserrsdown = thetaminosdowns
       scanname = "x"
       outthetaval = xval
-      sigmas = thetasigmasv
+      sigmasv = thetasigmasv
+      outidx = 0
     else:
-      outname = var.split("_")[-1]
-      poi = "_".join(var.split("_")[:-1])
-      if not outname in outidxs:
-        raise Exception("Output not found")
-      if not poi in pois:
-        raise Exception("poi not found")
-      
-      outidx = outidxs[outname]
-      
-      scanname = outname
-      erroutidx = pois.index(poi)
+      if not var in outidxmap:
+        raise Exception("poi %s not found" % var)
+
+      outidx = outidxmap[var]
+      erroutidx = outsubidxmap[var]
+
       erridx = erroutidx
       minoserrsup = outminosupss[outidx]
       minoserrsdown = outminosdownss[outidx]
@@ -1022,9 +1046,9 @@ for itoy in range(ntoys):
       sigmasv = outsigmass[outidx]
 
       
-    minosminimizer = minosminimizers[scanname]
-    scanminimizer = scanminimizers[scanname]
-    scanvar = scanvars[scanname]
+    minosminimizer = minosminimizers[outidx+1]
+    scanminimizer = scanminimizers[outidx+1]
+    scanvar = scanvars[outidx+1]
     
     l0.load(nllval+0.5,sess)
     x0.load(outthetaval,sess)
@@ -1049,7 +1073,7 @@ for itoy in range(ntoys):
     xvalminosdown, nllvalminosdown = sess.run([scanvar,l])
     dxvaldown = -(xvalminosdown[erridx]-outthetaval[erridx])
     minoserrsdown[erroutidx] = dxvaldown
-    
+        
   tstatus[0] = status
   terrstatus[0] = errstatus
   tedmval[0] = edmval
@@ -1060,16 +1084,16 @@ for itoy in range(ntoys):
   tndof[0] = x.shape[0]
   tndofpartial[0] = npoi
   
-  for output,outvals,outsigmas,minosups,minosdowns,outgenvals,toutvals,touterrs,toutminosups,toutminosdowns,toutgenvals in zip(outputs,outvalss,outsigmass,outminosupss,outminosdownss,outvalsgens,toutvalss,touterrss,toutminosupss,toutminosdownss,toutgenvalss):
-    outname = ":".join(output.name.split(":")[:-1])    
-    for poi,outval,outma,minosup,minosdown,outgenval,toutval,touterr,toutminosup,toutminosdown,toutgenval in zip(pois,outvals,outsigmas,minosups,minosdowns,outgenvals,toutvals,touterrs,toutminosups,toutminosdowns,toutgenvals):
+  for output,outputname, outvals,outsigmas,minosups,minosdowns,outgenvals,toutvals,touterrs,toutminosups,toutminosdowns,toutgenvals in zip(outputs, outputnames, outvalss,outsigmass,outminosupss,outminosdownss,outvalsgens,toutvalss,touterrss,toutminosupss,toutminosdownss,toutgenvalss):
+    #outname = ":".join(output.name.split(":")[:-1])    
+    for name,outval,outma,minosup,minosdown,outgenval,toutval,touterr,toutminosup,toutminosdown,toutgenval in zip(outputname,outvals,outsigmas,minosups,minosdowns,outgenvals,toutvals,touterrs,toutminosups,toutminosdowns,toutgenvals):
       toutval[0] = outval
       touterr[0] = outma
       toutminosup[0] = minosup
       toutminosdown[0] = minosdown
       toutgenval[0] = outgenval
       if itoy==0:
-        print('%s_%s = %e +- %f (+%f -%f)' % (poi,outname,outval,outma,minosup,minosdown))
+        print('%s = %e +- %f (+%f -%f)' % (name,outval,outma,minosup,minosdown))
 
   for syst,thetaval,theta0val,sigma,minosup,minosdown,thetagenval, tthetaval,ttheta0val,tthetaerr,tthetaminosup,tthetaminosdown,tthetagenval in zip(systs,thetavals,theta0vals,thetasigmasv,thetaminosups,thetaminosdowns,thetavalsgen, tthetavals,ttheta0vals,tthetaerrs,tthetaminosups,tthetaminosdowns,tthetagenvals):
     tthetaval[0] = thetaval
@@ -1086,29 +1110,25 @@ for itoy in range(ntoys):
   for var in options.scan:
     print("running profile likelihood scan for %s" % var)
     if var in systs:
-      erroutidx = systs.index(var)
+      erroutidx = systs.tolist().index(var)
       erridx = npoi + erroutidx
       sigmasv = thetasigmasv
       scanname = "x"
       outthetaval = xval
+      outidx = 0
     else:
-      outname = var.split("_")[-1]
-      poi = "_".join(var.split("_")[:-1])
-      if not outname in outidxs:
-        raise Exception("Output not found")
-      if not poi in pois:
-        raise Exception("poi not found")
+      if not var in outidxmap:
+        raise Exception("poi %s not found" % var)
+
+      outidx = outidxmap[var]
+      erroutidx = outsubidxmap[var]
       
-      outidx = outidxs[outname]
-      
-      scanname = outname
-      erroutidx = pois.index(poi)
       erridx = erroutidx
       sigmasv = outsigmass[outidx]
       outthetaval = np.concatenate((outvalss[outidx],thetavals),axis=0)
       
       
-    scanminimizer = scanminimizers[scanname]
+    scanminimizer = scanminimizers[outidx+1]
     
     x0.load(outthetaval,sess)
     
