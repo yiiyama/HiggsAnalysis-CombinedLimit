@@ -37,7 +37,8 @@ from HiggsAnalysis.CombinedLimit.DatacardParser import *
 obsline = []; obskeyline = [] ;
 keyline = []; expline = []; systlines = {}
 signals = []; backgrounds = []; shapeLines = []
-paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {}; rateParamsOrder = set(); chargeGroups = collections.OrderedDict()
+paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {}; rateParamsOrder = set()
+chargeGroups = collections.OrderedDict(); polGroups = collections.OrderedDict(); sumGroups = collections.OrderdDict(); chargeMetaGroups = collections.OrderedDict();
 extArgs = {}; binParFlags = {}
 nuisanceEdits = [];
 
@@ -184,7 +185,31 @@ for ich,fname in enumerate(args):
             else:
                 raise RuntimeError, "Conflicting definition of chargeGroup %s" % groupName
         else:
-            chargeGroups[groupName] = procNames            
+            chargeGroups[groupName] = procNames
+    for groupName,procNames in DC.polGroups.iteritems():
+        if groupName in polGroups:
+            if polGroups[groupName] == procNames:
+                continue
+            else:
+                raise RuntimeError, "Conflicting definition of polGroup %s" % groupName
+        else:
+            polGroups[groupName] = procNames
+    for groupName,procNames in DC.sumGroups.iteritems():
+        if groupName in sumGroups:
+            if sumGroups[groupName] == procNames:
+                continue
+            else:
+                raise RuntimeError, "Conflicting definition of sumGroup %s" % groupName
+        else:
+            sumGroups[groupName] = procNames
+    for groupName,procNames in DC.chargeMetaGroups.iteritems():
+        if groupName in chargeMetaGroups:
+            if chargeMetaGroups[groupName] == procNames:
+                continue
+            else:
+                raise RuntimeError, "Conflicting definition of chargeMetaGroup %s" % groupName
+        else:
+            chargeMetaGroups[groupName] = procNames
 
     # Finally report nuisance edits propagated to end of card
     for editline in DC.nuisanceEditLines:

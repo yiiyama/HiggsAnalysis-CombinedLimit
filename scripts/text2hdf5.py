@@ -59,8 +59,6 @@ else:
 ## Parse text file 
 DC = parseCard(file, options)
 
-print(DC.chargeGroups)
-
 if options.dumpCard:
     DC.print_structure()
     exit()
@@ -117,6 +115,36 @@ for group in DC.chargeGroups:
   for proc in DC.chargeGroups[group]:
     chargegroupidx.append(procs.index(proc))
   chargegroupidxs.append(chargegroupidx)
+
+#list of groups of signal processes by polarization
+polgroups = []
+polgroupidxs = []
+for group in DC.polGroups:
+  polgroups.append(group)
+  polgroupidx = []
+  for proc in DC.polGroups[group]:
+    polgroupidx.append(procs.index(proc))
+  polgroupidxs.append(polgroupidx)
+  
+#list of groups of signal processes to be summed
+sumgroups = []
+sumgroupsegmentids = []
+sumgroupidxs = []
+for igroup,group in enumerate(DC.sumGroups):
+  sumgroups.append(group)
+  for proc in DC.sumGroups[group]:
+    sumgroupsegmentids.append(igroup)
+    sumgroupidxs.append(procs.index(proc))
+    
+#list of groups of signal processes by chargemeta
+chargemetagroups = []
+chargemetagroupidxs = []
+for group in DC.chargeMetaGroups:
+  chargemetagroups.append(group)
+  chargemetagroupidx = []
+  for proc in DC.chargeMetaGroups[group]:
+    chargemetagroupidx.append(sumgroups.index(proc))
+  chargemetagroupidxs.append(chargemetagroupidx)
     
 #list of channels, ordered such that masked channels are last
 chans = []
@@ -489,6 +517,27 @@ hchargegroups[...] = chargegroups
 
 hchargegroupidxs = f.create_dataset("hchargegroupidxs", [len(chargegroups),2], dtype='int32', compression="gzip")
 hchargegroupidxs[...] = chargegroupidxs
+
+hpolgroups = f.create_dataset("hpolgroups", [len(polgroups)], dtype=h5py.special_dtype(vlen=str), compression="gzip")
+hpolgroups[...] = polgroups
+
+hpolgroupidxs = f.create_dataset("hpolgroupidxs", [len(polgroups),3], dtype='int32', compression="gzip")
+hpolgroupidxs[...] = polgroupidxs
+
+hsumgroups = f.create_dataset("hsumgroups", [len(sumgroups)], dtype=h5py.special_dtype(vlen=str), compression="gzip")
+hsumgroups[...] = sumgroups
+
+hsumgroupsegmentids = f.create_dataset("hsumgroupsegmentids", [len(sumgroupsegmentids)], dtype='int32', compression="gzip")
+hsumgroupsegmentids[...] = sumgroupsegmentids
+
+hsumgroupidxs = f.create_dataset("hsumgroupidxs", [len(sumgroupidxs)], dtype='int32', compression="gzip")
+hsumgroupidxs[...] = sumgroupidxs
+
+hchargemetagroups = f.create_dataset("hchargemetagroups", [len(chargemetagroups)], dtype=h5py.special_dtype(vlen=str), compression="gzip")
+hchargemetagroups[...] = chargemetagroups
+
+hchargemetagroupidxs = f.create_dataset("hchargemetagroupidxs", [len(chargemetagroups),2], dtype='int32', compression="gzip")
+hchargemetagroupidxs[...] = chargemetagroupidxs
 
 hmaskedchans = f.create_dataset("hmaskedchans", [len(maskedchans)], dtype=h5py.special_dtype(vlen=str), compression="gzip")
 hmaskedchans[...] = maskedchans

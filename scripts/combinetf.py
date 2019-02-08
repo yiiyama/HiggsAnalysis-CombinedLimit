@@ -87,6 +87,13 @@ systgroups = f['hsystgroups'][...]
 systgroupidxs = f['hsystgroupidxs'][...]
 chargegroups = f['hchargegroups'][...]
 chargegroupidxs = f['hchargegroupidxs'][...]
+polgroups = f['hpolgroups'][...]
+polgroupidxs = f['hpolgroupidxs'][...]
+sumgroups = f['hsumgroups'][...]
+sumgroupsegmentids = f['hsumgroupsegmentids'][...]
+sumgroupidxs = f['hsumgroupidxs'][...]
+chargemetagroups = f['hchargemetagroups'][...]
+chargemetagroupidxs = f['hchargemetagroupidxs'][...]
 maskedchans = f['hmaskedchans'][...]
 
 #load arrays from file
@@ -111,6 +118,9 @@ nsyst = len(systs)
 nsignals = len(signals)
 nsystgroups = len(systgroups)
 nchargegroups = len(chargegroups)
+npolgroups = len(polgroups)
+nsumgroups = len(sumgroups)
+nchargemetagroups = len(chargemetagroups)
 
 systgroupsfull = systgroups.tolist()
 systgroupsfull.append("stat")
@@ -407,27 +417,89 @@ if nbinsmasked>0:
 if nchargegroups > 0:  
   #build matrix of cross sections
   chargegroupxsecs = tf.reshape(tf.gather(pmaskedexp, tf.reshape(chargegroupidxs,[-1])),chargegroupidxs.shape)
-  
+    
   #total xsec = sigma_+ + sigma_-
-  chargetotals = tf.reduce_sum(chargegroupxsecs,axis=-1)
-  
   #charge asym = (sigma_+ - sigma_-)/(sigma_+ + sigma_-)
-  mcharges = tf.constant([[1.],[-1.]],dtype=dtype)
-  mchargediffs = tf.matmul(chargegroupxsecs,mcharges)
-  chargediffs = tf.reshape(mchargediffs,[-1])
-  chargeasyms = chargediffs/chargetotals
+  mchargecoeffs = tf.constant([[1.,1.],[1.,-1.]],dtype=dtype)
+  mchargesums = tf.matmul(chargegroupxsecs,mchargecoeffs,transpose_b=True)
+  chargetotals = mchargesums[:,0]
+  chargeasyms = mchargesums[:,1]/chargetotals
   
-  chargepois = tf.concat([chargeasyms,chargetotals],axis=0)
+  chargepois = tf.concat([chargetotals,chargeasyms],axis=0)
   chargepois = tf.identity(chargepois,"chargepois")
   outputs.append(chargepois)
   
   outputname = []
   for group in chargegroups:
-    outputname.append("%s_chargeasym" % group)
+    outputname.append("%s_chargetotalxsec" % group)
   for group in chargegroups:
-    outputname.append("%s_totalxsec" % group)
+    outputname.append("%s_chargeasym" % group)
   
   outputnames.append(outputname)
+  
+#angular coefficients if defined
+if npolgroups > 0:  
+  #build matrix of cross sections
+  polgroupxsecs = tf.reshape(tf.gather(pmaskedexp, tf.reshape(polgroupidxs,[-1])),polgroupidxs.shape)
+  
+  #unpolarized xsec = sigma_L + sigma_R + sigma_0
+  #A0 = 2*f0 = 2*sigma_0/unpolarizedxsec
+  #A4 = 2*(fL-fR) = 2*(sigma_L-sigma_R)/unpolarizedxsec
+  mpolcoeffs = tf.constant([[1.,1.,1.],[0.,0.,2.],[2.,-2.,0.]],dtype=dtype)
+  mpolsums = tf.matmul(polgroupxsecs,mpolcoeffs,transpose_b=True)
+  poltotals = mpolsums[:,0]
+  angularcoeffs = mpolsums[:,1:]/mpolsums[:,:1]
+  
+  polpois = tf.concat([poltotals,tf.reshape(tf.transpose(angularcoeffs),[-1])],axis=0)
+  polpois = tf.identity(polpois,"polpois")
+  outputs.append(polpois)
+  
+  outputname = []
+  for group in polgroups:
+    outputname.append("%s_unpolarizedxsec" % group)
+  for group in polgroups:
+    outputname.append("%s_a0" % group)
+  for group in polgroups:
+    outputname.append("%s_a4" % group)
+    
+  outputnames.append(outputname)
+  
+#sums of cross sections if defined
+if nsumgroups > 0:
+  #build sums of cross sections
+  xsecs = tf.gather(pmaskedexp,sumgroupidxs)
+  sumpois = tf.segment_sum(xsecs,sumgroupsegmentids)
+  sumpois.set_shape([nsumgroups])
+  sumpois = tf.identity(sumpois,"sumpois")
+  outputs.append(sumpois)
+  
+  outputname = []
+  for group in sumgroups:
+    outputname.append("%s_sumxsec" % group)
+  outputnames.append(outputname)
+  
+  if nchargemetagroups > 0:
+    #build matrix of cross sections
+    chargemetagroupxsecs = tf.reshape(tf.gather(sumpois, tf.reshape(chargemetagroupidxs,[-1])),chargemetagroupidxs.shape)
+        
+    #total xsec = sigma_+ + sigma_-
+    #chargemeta asym = (sigma_+ - sigma_-)/(sigma_+ + sigma_-)
+    mchargemetacoeffs = tf.constant([[1.,1.],[1.,-1.]],dtype=dtype)
+    mchargemetasums = tf.matmul(chargemetagroupxsecs,mchargemetacoeffs,transpose_b=True)
+    chargemetatotals = mchargemetasums[:,0]
+    chargemetaasyms = mchargemetasums[:,1]/chargemetatotals
+    
+    chargemetapois = tf.concat([chargemetatotals,chargemetaasyms],axis=0)
+    chargemetapois = tf.identity(chargemetapois,"chargemetapois")
+    outputs.append(chargemetapois)
+    
+    outputname = []
+    for group in chargemetagroups:
+      outputname.append("%s_chargemetatotalxsec" % group)
+    for group in chargemetagroups:
+      outputname.append("%s_chargemetaasym" % group)
+    
+    outputnames.append(outputname)
 
 nthreadshess = options.nThreads
 if nthreadshess<0:
@@ -456,9 +528,10 @@ for output in outputs:
 if options.doImpacts:
   #signed per nuisance impacts
   nuisanceimpactouts = []
-  for invhessianout in invhessianouts:
+  for output,invhessianout in zip(outputs,invhessianouts):
+    nout = output.shape[0]
     #impact for poi at index i in covariance matrix from nuisance with index j is C_ij/sqrt(C_jj) = <deltax deltatheta>/sqrt(<deltatheta^2>)
-    nuisanceimpactout = invhessianout[:npoi,npoi:]/tf.reshape(tf.sqrt(tf.matrix_diag_part(invhessianout)[npoi:]),[1,-1])
+    nuisanceimpactout = invhessianout[:nout,nout:]/tf.reshape(tf.sqrt(tf.matrix_diag_part(invhessianout)[nout:]),[1,-1])
     nuisanceimpactouts.append(nuisanceimpactout)
 
   #unsigned per nuisance group impacts
@@ -484,8 +557,9 @@ if options.doImpacts:
 
   nuisancegroupimpactouts = []
   #for vcovout in vcovouts:
-  for invhessianout, jacout in zip(invhessianouts,jacouts):
-    vcovout = invhessianout[:npoi,npoi:]
+  for output, invhessianout, jacout in zip(outputs,invhessianouts,jacouts):
+    nout = output.shape[0]
+    vcovout = invhessianout[:nout,nout:]
     nuisancegroupimpactlist = []
     for systgroupidx,groupmcov in zip(systgroupidxs,groupmcovs):
       #impact is generalization of per-nuisance impacts above v^T C^-1 v
@@ -496,7 +570,9 @@ if options.doImpacts:
       nuisancegroupimpactlist.append(vimpact)
     
     #statistical uncertainties only
-    jacoutstat = jacout[:npoi,:npoi]
+    print("jacout shape:")
+    print(jacout.shape)
+    jacoutstat = jacout[:nout,:npoi]
     invhessoutStat = tf.matmul(jacoutstat,tf.matmul(invhessianStat,jacoutstat,transpose_b=True))
     impactStat = tf.sqrt(tf.matrix_diag_part(invhessoutStat))
     nuisancegroupimpactlist.append(impactStat)
@@ -504,18 +580,12 @@ if options.doImpacts:
     #bin by bin template statistical uncertainties
     if options.binByBinStat:
       invhessianoutNoBBB = tf.matmul(jacout,tf.matmul(invhessianNoBBB,jacout,transpose_b=True))      
-      impactBBB = tf.sqrt(tf.matrix_diag_part(invhessianout - invhessianoutNoBBB)[:npoi])
+      impactBBB = tf.sqrt(tf.matrix_diag_part(invhessianout - invhessianoutNoBBB)[:nout])
       nuisancegroupimpactlist.append(impactBBB)
     
     nuisancegroupimpactout = tf.stack(nuisancegroupimpactlist,axis=1)
     nuisancegroupimpactouts.append(nuisancegroupimpactout)
     
-l0 = tf.Variable(np.zeros([],dtype=dtype),trainable=False)
-x0 = tf.Variable(np.zeros(x.shape,dtype=dtype),trainable=False)
-a = tf.Variable(np.zeros([],dtype=dtype),trainable=False)
-errdir = tf.Variable(np.zeros(x.shape,dtype=dtype),trainable=False)
-dlconstraint = l - l0
-
 def experr(expected, invhesschol):
   #compute uncertainty on expectation propagating through uncertainty on fit parameters using full covariance matrix
   
@@ -600,15 +670,28 @@ for output in outputs:
   outputtheta = tf.concat([output,theta],axis=0)
   scanvars.append(outputtheta)
 
+l0 = tf.Variable(np.zeros([],dtype=dtype),trainable=False)
+dlconstraint = l - l0
+a = tf.Variable(np.zeros([],dtype=dtype),trainable=False)
+
+#x0 = tf.Variable(np.zeros(x.shape,dtype=dtype),trainable=False)
+#errdir = tf.Variable(np.zeros(x.shape,dtype=dtype),trainable=False)
+
 scanminimizers = []
 minosminimizers = []
+x0s = []
+errdirs = []
 for scanvar in scanvars:
+  x0 = tf.Variable(np.zeros(scanvar.shape,dtype=dtype),trainable=False)
+  errdir = tf.Variable(np.zeros(scanvar.shape,dtype=dtype),trainable=False)
   errproj = -tf.reduce_sum((scanvar-x0)*errdir,axis=0)
   dxconstraint = a + errproj
   scanminimizer = ScipyTROptimizerInterface(l, var_list = [x], var_to_bounds={x: (lb,ub)},  equalities=[dxconstraint], options={'verbose': options.fitverbose, 'maxiter' : 100000, 'gtol' : 0., 'xtol' : xtol, 'barrier_tol' : btol})
   minosminimizer = ScipyTROptimizerInterface(errproj, var_list = [x], var_to_bounds={x: (lb,ub)},  equalities=[dlconstraint], options={'verbose': options.fitverbose, 'maxiter' : 100000, 'gtol' : 0., 'xtol' : xtol, 'barrier_tol' : btol})
   scanminimizers.append(scanminimizer)
   minosminimizers.append(minosminimizer)
+  x0s.append(x0)
+  errdirs.append(errdir)
 
 globalinit = tf.global_variables_initializer()
 nexpnomassign = tf.assign(nexpnom,nexpcentral)
@@ -952,18 +1035,20 @@ for itoy in range(ntoys):
   hists = []
 
   for output, outputname, outvals,invhessoutval in zip(outputs, outputnames, outvalss,invhessoutvals):
-    outname = ":".join(output.name.split(":")[:-1])    
+    outname = ":".join(output.name.split(":")[:-1])
+    outthetanames = outputname + systs.tolist()
+    nparmsout = len(outthetanames)
 
     if not options.toys > 0:
       dName = 'asimov' if options.toys < 0 else 'data fit'
-      correlationHist = ROOT.TH2D('correlation_matrix_channel'+outname, 'correlation matrix for '+dName+' in channel'+outname, int(nparms), 0., 1., int(nparms), 0., 1.)
-      covarianceHist  = ROOT.TH2D('covariance_matrix_channel' +outname, 'covariance matrix for ' +dName+' in channel'+outname, int(nparms), 0., 1., int(nparms), 0., 1.)
+      correlationHist = ROOT.TH2D('correlation_matrix_channel'+outname, 'correlation matrix for '+dName+' in channel'+outname, nparmsout, 0., 1., nparmsout, 0., 1.)
+      covarianceHist  = ROOT.TH2D('covariance_matrix_channel' +outname, 'covariance matrix for ' +dName+' in channel'+outname, nparmsout, 0., 1., nparmsout, 0., 1.)
       correlationHist.GetZaxis().SetRangeUser(-1., 1.)
 
       hists.append(correlationHist)
       hists.append(covarianceHist)
       
-      outthetanames = outputname + systs.tolist()
+      
 
       #set labels
       for ip1, p1 in enumerate(outthetanames):
@@ -999,16 +1084,17 @@ for itoy in range(ntoys):
   if options.doImpacts and not options.toys > 0:
     dName = 'asimov' if options.toys < 0 else 'data fit'
     nuisanceimpactoutvals, nuisancegroupimpactoutvals = sess.run([nuisanceimpactouts,nuisancegroupimpactouts])
-    for output, nuisanceimpactoutval, nuisancegroupimpactoutval in zip(outputs,nuisanceimpactoutvals,nuisancegroupimpactoutvals):
+    for output, outputname, nuisanceimpactoutval, nuisancegroupimpactoutval in zip(outputs,outputnames,nuisanceimpactoutvals,nuisancegroupimpactoutvals):
       outname = ":".join(output.name.split(":")[:-1])
-      nuisanceImpactHist = ROOT.TH2D('nuisance_impact_'+outname, 'per-nuisance impacts for '+dName+' in '+outname, int(npoi), 0., 1., int(nsyst), 0., 1.)
-      nuisanceGroupImpactHist = ROOT.TH2D('nuisance_group_impact_'+outname, 'per-nuisance-group impacts for '+dName+' in '+outname, int(npoi), 0., 1., int(nsystgroupsfull), 0., 1.)
+      nout = output.shape[0]
+      nuisanceImpactHist = ROOT.TH2D('nuisance_impact_'+outname, 'per-nuisance impacts for '+dName+' in '+outname, int(nout), 0., 1., int(nsyst), 0., 1.)
+      nuisanceGroupImpactHist = ROOT.TH2D('nuisance_group_impact_'+outname, 'per-nuisance-group impacts for '+dName+' in '+outname, int(nout), 0., 1., int(nsystgroupsfull), 0., 1.)
       
       hists.append(nuisanceImpactHist)
       hists.append(nuisanceGroupImpactHist)
       
       #set labels
-      for ipoi, poi in enumerate(pois):
+      for ipoi, poi in enumerate(outputname):
         nuisanceImpactHist.GetXaxis().SetBinLabel(ipoi+1, '%s' % poi)
         nuisanceGroupImpactHist.GetXaxis().SetBinLabel(ipoi+1, '%s' % poi)
         
@@ -1049,6 +1135,8 @@ for itoy in range(ntoys):
     minosminimizer = minosminimizers[outidx+1]
     scanminimizer = scanminimizers[outidx+1]
     scanvar = scanvars[outidx+1]
+    x0 = x0s[outidx+1]
+    errdir = errdirs[outidx+1]
     
     l0.load(nllval+0.5,sess)
     x0.load(outthetaval,sess)
@@ -1129,6 +1217,8 @@ for itoy in range(ntoys):
       
       
     scanminimizer = scanminimizers[outidx+1]
+    x0 = x0s[outidx+1]
+    errdir = errdirs[outidx+1]
     
     x0.load(outthetaval,sess)
     

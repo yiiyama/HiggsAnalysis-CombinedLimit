@@ -54,6 +54,9 @@ class Datacard():
 	self.discretes = []
 	
 	self.chargeGroups = OrderedDict()
+	self.polGroups = OrderedDict()
+	self.sumGroups = OrderedDict()
+	self.chargeMetaGroups = OrderedDict()
 
     def print_structure(self):
 	"""
@@ -99,6 +102,9 @@ MB = None
 	print "DC.groups 	= "		, self.groups        		,"#",type(self.groups)	
 	print "DC.discretes 	= "		, self.discretes        	,"#",type(self.discretes)	
 	print "DC.chargeGroups 	= "		, self.chargeGroups        	,"#",type(self.chargeGroups)	
+	print "DC.polGroups 	= "		, self.polGroups        	,"#",type(self.polGroups)	
+	print "DC.sumGroups 	= "		, self.sumGroups        	,"#",type(self.sumGroups)	
+	print "DC.chargeMetaGroups 	= "		, self.chargeMetaGroups        	,"#",type(self.chargeMetaGroups)	
 
 	print """
 
