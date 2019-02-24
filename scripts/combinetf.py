@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 import re
 from sys import argv, stdout, stderr, exit, modules
-from optparse import OptionParser
+from argparse import ArgumentParser
 import multiprocessing
+
+import setGPU
 
 import tensorflow as tf
 
@@ -37,43 +39,40 @@ from array import array
 
 from HiggsAnalysis.CombinedLimit.tfscipyhess import ScipyTROptimizerInterface,jacobian,sum_loop
 
-parser = OptionParser(usage="usage: %prog [options] datacard.txt -o output \nrun with --help to get list of options")
-parser.add_option("-o","--output", default=None, type="string", help="output file name")
-parser.add_option("-t","--toys", default=0, type=int, help="run a given number of toys, 0 fits the data (default), and -1 fits the asimov toy")
-parser.add_option("","--toysFrequentist", default=True, action='store_true', help="run frequentist-type toys by randomizing constraint minima")
-parser.add_option("","--bypassFrequentistFit", default=True, action='store_true', help="bypass fit to data when running frequentist toys to get toys based on prefit expectations")
-parser.add_option("","--bootstrapData", default=False, action='store_true', help="throw toys directly from observed data counts rather than expectation from templates")
-parser.add_option("","--randomizeStart", default=False, action='store_true', help="randomize starting values for fit (only implemented for asimov dataset for now")
-parser.add_option("","--tolerance", default=1e-3, type=float, help="convergence tolerance for minimizer")
-parser.add_option("","--expectSignal", default=1., type=float, help="rate multiplier for signal expectation (used for fit starting values and for toys)")
-parser.add_option("","--seed", default=123456789, type=int, help="random seed for toys")
-parser.add_option("","--fitverbose", default=0, type=int, help="verbosity level for fit")
-parser.add_option("","--minos", default=[], type="string", action="append", help="run minos on the specified variables")
-parser.add_option("","--scan", default=[], type="string", action="append", help="run likelihood scan on the specified variables")
-parser.add_option("","--scanPoints", default=16, type=int, help="default number of points for likelihood scan")
-parser.add_option("","--scanRange", default=3., type=float, help="default scan range in terms of hessian uncertainty")
-parser.add_option("","--nThreads", default=-1., type=int, help="set number of threads (default is -1: use all available cores)")
-parser.add_option("","--POIMode", default="mu",type="string", help="mode for POI's")
-parser.add_option("","--nonNegativePOI", default=True, action='store_true', help="force signal strengths to be non-negative")
-parser.add_option("","--POIDefault", default=1., type=float, help="mode for POI's")
-parser.add_option("","--doBenchmark", default=False, action='store_true', help="run benchmarks")
-parser.add_option("","--saveHists", default=False, action='store_true', help="save prefit and postfit histograms")
-parser.add_option("","--computeHistErrors", default=False, action='store_true', help="propagate uncertainties to prefit and postfit histograms")
-parser.add_option("","--binByBinStat", default=False, action='store_true', help="add bin-by-bin statistical uncertainties on templates (using Barlow and Beeston 'lite' method")
-parser.add_option("","--correlateXsecStat", default=False, action='store_true', help="Assume that cross sections in masked channels are correlated with expected values in templates (ie computed from the same MC events)")
-parser.add_option("","--doImpacts", default=False, action='store_true', help="Compute impacts on POIs per nuisance parameter and per-nuisance parameter group")
-(options, args) = parser.parse_args()
-
-if len(args) == 0:
-    parser.print_usage()
-    exit(1)
+parser = ArgumentParser(usage="usage: combinetf.py [options] datacard.txt -o output \nrun with --help to get list of options")
+parser.add_argument('fileName', help='Input HDF5 file name')
+parser.add_argument("-o","--output", default=None, help="output file name")
+parser.add_argument("-t","--toys", default=0, type=int, help="run a given number of toys, 0 fits the data (default), and -1 fits the asimov toy")
+parser.add_argument("--toysFrequentist", action='store_true', help="run frequentist-type toys by randomizing constraint minima")
+parser.add_argument("--bypassFrequentistFit", default=True, action='store_true', help="bypass fit to data when running frequentist toys to get toys based on prefit expectations")
+parser.add_argument("--bootstrapData", default=False, action='store_true', help="throw toys directly from observed data counts rather than expectation from templates")
+parser.add_argument("--randomizeStart", default=False, action='store_true', help="randomize starting values for fit (only implemented for asimov dataset for now")
+parser.add_argument("--tolerance", default=1e-3, type=float, help="convergence tolerance for minimizer")
+parser.add_argument("--expectSignal", default=1., type=float, help="rate multiplier for signal expectation (used for fit starting values and for toys)")
+parser.add_argument("--seed", default=123456789, type=int, help="random seed for toys")
+parser.add_argument("--fitverbose", default=0, type=int, help="verbosity level for fit")
+parser.add_argument("--minos", default=[], nargs="+", help="run minos on the specified variables")
+parser.add_argument("--scan", default=[], nargs="+", help="run likelihood scan on the specified variables")
+parser.add_argument("--scanPoints", default=16, type=int, help="default number of points for likelihood scan")
+parser.add_argument("--scanRange", default=3., type=float, help="default scan range in terms of hessian uncertainty")
+parser.add_argument("--nThreads", default=-1., type=int, help="set number of threads (default is -1: use all available cores)")
+parser.add_argument("--POIMode", default="mu", help="mode for POI's")
+parser.add_argument("--nonNegativePOI", action='store_true', help="force signal strengths to be non-negative")
+parser.add_argument("--POIDefault", default=1., type=float, help="mode for POI's")
+parser.add_argument("--doBenchmark", action='store_true', help="run benchmarks")
+parser.add_argument("--saveHists", action='store_true', help="save prefit and postfit histograms")
+parser.add_argument("--computeHistErrors", action='store_true', help="propagate uncertainties to prefit and postfit histograms")
+parser.add_argument("--binByBinStat", action='store_true', help="add bin-by-bin statistical uncertainties on templates (using Barlow and Beeston 'lite' method")
+parser.add_argument("--correlateXsecStat", action='store_true', help="Assume that cross sections in masked channels are correlated with expected values in templates (ie computed from the same MC events)")
+parser.add_argument("--regularization", default='', help="Comma-separated array of process names to regularize.")
+parser.add_argument("--regularizationStrength", default=1., type=float, help="Regularization strength. When != 0, POIs are regularized.")
+parser.add_argument("--doImpacts", action='store_true', help="Compute impacts on POIs per nuisance parameter and per-nuisance parameter group")
+options = parser.parse_args()
     
 seed = options.seed
 print(seed)
 np.random.seed(seed)
 tf.set_random_seed(seed)
-
-options.fileName = args[0]
 
 cacheSize = 4*1024**2
 #TODO open file an extra time and enforce sufficient cache size for second file open
@@ -355,6 +354,33 @@ lc = tf.reduce_sum(0.5*tf.square(theta - theta0))
 
 l = ln + lc
 lfull = lnfull + lc
+
+if options.regularization:
+  ordered = options.regularization.split(',')
+  order = []
+  for s in signals:
+    order.append(ordered.index(s))
+
+  assert(len(order) == len(signals))
+  
+  coeff = []
+  for j in range(1, len(signals) - 1):
+    coeff.append([])
+    for i in range(len(signals)):
+      if order[i] == j:
+        coeff[-1].append(-2)
+      elif abs(order[i] - j) == 1:
+        coeff[-1].append(1)
+      else:
+        coeff[-1].append(0)
+
+  coeff = tf.constant(coeff, dtype=tf.float64)
+
+  deltasqinv = 0.5/options.regularizationStrength/options.regularizationStrength
+  lr = tf.reduce_sum(deltasqinv*tf.square(tf.tensordot(coeff, r, [[1], [0]])))
+
+  l = l + lr
+  lfull = l + lr
 
 if options.binByBinStat:
   #lbetav = -(kstat-1.)*tf.log(beta) + kstat*beta
@@ -970,7 +996,7 @@ for itoy in range(ntoys):
   for var in options.minos:
     print("running minos-like algorithm for %s" % var)
     if var in systs:
-      erroutidx = systs.index(var)
+      erroutidx = np.where(systs == var)[0]
       erridx = npoi + erroutidx
       minoserrsup = thetaminosups
       minoserrsdown = thetaminosdowns
