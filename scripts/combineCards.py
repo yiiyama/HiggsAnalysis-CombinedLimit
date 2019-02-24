@@ -4,6 +4,7 @@ from sys import argv
 import os.path
 from pprint import pprint
 from optparse import OptionParser
+from collections import OrderdDict
 parser = OptionParser(
     usage="%prog [options] [label=datacard.txt | datacard.txt]",
     epilog="The label=datacard.txt syntax allows to specify the label that channels from datacard.txt will have in the combined datacard. To combine cards with different energies one can use dc_7TeV=datacard7.txt dc_8TeV=datacard8.txt (avoid using labels starting with numbers)."
@@ -36,7 +37,8 @@ from HiggsAnalysis.CombinedLimit.DatacardParser import *
 obsline = []; obskeyline = [] ;
 keyline = []; expline = []; systlines = {}
 signals = []; backgrounds = []; shapeLines = []
-paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {}; rateParamsOrder = set();
+paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {}; rateParamsOrder = set()
+chargeGroups = collections.OrderedDict(); polGroups = collections.OrderedDict(); sumGroups = collections.OrderdDict(); chargeMetaGroups = collections.OrderedDict();
 extArgs = {}; binParFlags = {}
 nuisanceEdits = [];
 
@@ -175,6 +177,39 @@ for ich,fname in enumerate(args):
             groups[groupName].update(set(nuisanceNames))
         else:
             groups[groupName] = set(nuisanceNames)
+            
+    for groupName,procNames in DC.chargeGroups.iteritems():
+        if groupName in chargeGroups:
+            if chargeGroups[groupName] == procNames:
+                continue
+            else:
+                raise RuntimeError, "Conflicting definition of chargeGroup %s" % groupName
+        else:
+            chargeGroups[groupName] = procNames
+    for groupName,procNames in DC.polGroups.iteritems():
+        if groupName in polGroups:
+            if polGroups[groupName] == procNames:
+                continue
+            else:
+                raise RuntimeError, "Conflicting definition of polGroup %s" % groupName
+        else:
+            polGroups[groupName] = procNames
+    for groupName,procNames in DC.sumGroups.iteritems():
+        if groupName in sumGroups:
+            if sumGroups[groupName] == procNames:
+                continue
+            else:
+                raise RuntimeError, "Conflicting definition of sumGroup %s" % groupName
+        else:
+            sumGroups[groupName] = procNames
+    for groupName,procNames in DC.chargeMetaGroups.iteritems():
+        if groupName in chargeMetaGroups:
+            if chargeMetaGroups[groupName] == procNames:
+                continue
+            else:
+                raise RuntimeError, "Conflicting definition of chargeMetaGroup %s" % groupName
+        else:
+            chargeMetaGroups[groupName] = procNames
 
     # Finally report nuisance edits propagated to end of card
     for editline in DC.nuisanceEditLines:
