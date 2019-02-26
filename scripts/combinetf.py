@@ -4,7 +4,10 @@ from sys import argv, stdout, stderr, exit, modules
 from argparse import ArgumentParser
 import multiprocessing
 
-import setGPU
+try:
+  import setGPU
+except ImportError:
+  pass
 
 import tensorflow as tf
 
