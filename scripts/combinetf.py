@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import re
-from sys import argv, stdout, stderr, exit, modules
+import os
+from sys import argv, stdout, stderr, exit, modules, path
 from argparse import ArgumentParser
 import multiprocessing
 
@@ -67,8 +68,7 @@ parser.add_argument("--saveHists", action='store_true', help="save prefit and po
 parser.add_argument("--computeHistErrors", action='store_true', help="propagate uncertainties to prefit and postfit histograms")
 parser.add_argument("--binByBinStat", action='store_true', help="add bin-by-bin statistical uncertainties on templates (using Barlow and Beeston 'lite' method")
 parser.add_argument("--correlateXsecStat", action='store_true', help="Assume that cross sections in masked channels are correlated with expected values in templates (ie computed from the same MC events)")
-parser.add_argument("--regularization", default='', help="Comma-separated array of process names to regularize.")
-parser.add_argument("--regularizationStrength", default=1., type=float, help="Regularization strength. When != 0, POIs are regularized.")
+parser.add_argument("--addConstraint", default='', help="script.py[(arguments)] where script.py is a python script defining a function add_constraint(combinetf, *args, **kwds) that returns the NLL of additional constraint terms. The argument combinetf is a namespace object holding all variables in combinetf.py as its attributes. String <arguments> is evaluated as a python expression and passed to the function as additional arguments.")
 parser.add_argument("--doImpacts", action='store_true', help="Compute impacts on POIs per nuisance parameter and per-nuisance parameter group")
 options = parser.parse_args()
     
@@ -373,32 +373,32 @@ lc = tf.reduce_sum(0.5*tf.square(theta - theta0))
 l = ln + lc
 lfull = lnfull + lc
 
-if options.regularization:
-  ordered = options.regularization.split(',')
-  order = []
-  for s in signals:
-    order.append(ordered.index(s))
+if options.addConstraint:
+  import importlib
 
-  assert(len(order) == len(signals))
+  class Namespace(object):
+    pass
   
-  coeff = []
-  for j in range(1, len(signals) - 1):
-    coeff.append([])
-    for i in range(len(signals)):
-      if order[i] == j:
-        coeff[-1].append(-2)
-      elif abs(order[i] - j) == 1:
-        coeff[-1].append(1)
-      else:
-        coeff[-1].append(0)
+  ns = Namespace()
+  
+  for key, value in globals().items():
+    setattr(ns, key, value)
 
-  coeff = tf.constant(coeff, dtype=tf.float64)
+  matches = re.match('([^(]+)(?:\((.*)\)|)', options.addConstraint)
 
-  deltasqinv = 0.5/options.regularizationStrength/options.regularizationStrength
-  lr = tf.reduce_sum(deltasqinv*tf.square(tf.tensordot(coeff, r, [[1], [0]])))
+  if not matches.group(1).endswith('.py'):
+    raise Exception('Invalid script name ' + matches.group(1))
+
+  path.insert(0, os.path.dirname(os.path.realpath(matches.group(1))))
+  constraintmodule = importlib.import_module(os.path.basename(matches.group(1))[:-3])
+
+  if matches.group(2) is None:
+    lr = constraintmodule.add_constraint(ns)
+  else:
+    lr = eval('constraintmodule.add_constraint(ns, ' + matches.group(2) + ')')
 
   l = l + lr
-  lfull = l + lr
+  lfull = lfull + lr
 
 if options.binByBinStat:
   #lbetav = -(kstat-1.)*tf.log(beta) + kstat*beta
@@ -1079,6 +1079,25 @@ for itoy in range(ntoys):
     outname = ":".join(output.name.split(":")[:-1])
     outthetanames = outputname + systs.tolist()
     nparmsout = len(outthetanames)
+
+    # TODO do this on tf not np
+    covpartial = np.zeros([npoi, npoi], dtype=dtype)
+
+    for ix, name1 in enumerate(pois):
+        for iy, name2 in enumerate(pois):
+            covpartial[ix][iy] = invhessoutval[ix][iy]
+    
+    invcovpartial = np.linalg.inv(covpartial)
+    
+    diff = [(v - 1.) for v in outvals]
+    
+    chi2 = 0.
+    
+    for ix in range(npoi):
+        for iy in range(npoi):
+            chi2 += diff[ix] * diff[iy] * invcovpartial[ix][iy]
+
+    tchisqpartial[0] = chi2
 
     if not options.toys > 0:
       dName = 'asimov' if options.toys < 0 else 'data fit'
