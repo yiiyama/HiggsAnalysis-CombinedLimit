@@ -407,6 +407,8 @@ if options.POIMode == "mu":
     outputname.append("%s_%s" % (signal,options.POIMode))
 outputnames.append(outputname)
   
+taureg = -1.
+  
 if options.POIMode == "mu":  
   if nbinsmasked>0:
     outputs.append(pmaskedexp)
@@ -523,7 +525,6 @@ if options.POIMode == "mu":
       outputnames.append(outputname)
 
   #regularization
-  taureg = -1.
   if options.doRegularization and nreggroups > 0:
     if options.regularizationUseExpected:
       regsource = poi
