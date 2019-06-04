@@ -54,7 +54,7 @@ parser.add_option("","--scanPoints", default=16, type=int, help="default number 
 parser.add_option("","--scanRange", default=3., type=float, help="default scan range in terms of hessian uncertainty")
 parser.add_option("","--nThreads", default=-1., type=int, help="set number of threads (default is -1: use all available cores)")
 parser.add_option("","--POIMode", default="mu",type="string", help="mode for POI's")
-parser.add_option("","--nonNegativePOI", default=True, action='store_true', help="force signal strengths to be non-negative")
+parser.add_option("","--allowNegativePOI", default=False, action='store_true', help="allow signal strengths to be negative (otherwise constrained to be non-negative)")
 parser.add_option("","--POIDefault", default=1., type=float, help="mode for POI's")
 parser.add_option("","--doBenchmark", default=False, action='store_true', help="run benchmarks")
 parser.add_option("","--saveHists", default=False, action='store_true', help="save prefit and postfit histograms")
@@ -152,10 +152,10 @@ else:
   norm = maketensor(hnorm)
   logk = maketensor(hlogk)
 
-if options.nonNegativePOI:
-  boundmode = 1
-else:
+if options.allowNegativePOI:
   boundmode = 0
+else:
+  boundmode = 1
 
 pois = []  
   
