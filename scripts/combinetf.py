@@ -711,7 +711,7 @@ if options.useSciPyMinimizer:
   scipyminimizer = ScipyTROptimizerInterface(l, var_list = [x], var_to_bounds={x: (lb,ub)}, options={'verbose': options.fitverbose, 'maxiter' : 100000, 'gtol' : 0., 'xtol' : xtol, 'barrier_tol' : btol})
 else:
   tfminimizer = SR1TrustExact(l,x,grad)
-  opinit = tfminimizer.initialize(l,x,grad,hessian)
+  opinit = tfminimizer.initialize(l,x,grad)
   opmin = tfminimizer.minimize(l,x,grad)
 
 outidxmap = {}
