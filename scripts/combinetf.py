@@ -1,8 +1,14 @@
 #!/usr/bin/env python
 import re
-from sys import argv, stdout, stderr, exit, modules
-from optparse import OptionParser
+import os
+from sys import argv, stdout, stderr, exit, modules, path
+from argparse import ArgumentParser
 import multiprocessing
+
+try:
+  import setGPU
+except ImportError:
+  pass
 
 import tensorflow as tf
 
@@ -77,8 +83,6 @@ seed = options.seed
 print(seed)
 np.random.seed(seed)
 tf.set_random_seed(seed)
-
-options.fileName = args[0]
 
 cacheSize = 4*1024**2
 #TODO open file an extra time and enforce sufficient cache size for second file open
@@ -1098,6 +1102,25 @@ for itoy in range(ntoys):
     outthetanames = outputname + systs.tolist()
     nout = len(outputname)
     nparmsout = len(outthetanames)
+
+    # TODO do this on tf not np
+    covpartial = np.zeros([npoi, npoi], dtype=dtype)
+
+    for ix, name1 in enumerate(pois):
+        for iy, name2 in enumerate(pois):
+            covpartial[ix][iy] = invhessoutval[ix][iy]
+    
+    invcovpartial = np.linalg.inv(covpartial)
+    
+    diff = [(v - 1.) for v in outvals]
+    
+    chi2 = 0.
+    
+    for ix in range(npoi):
+        for iy in range(npoi):
+            chi2 += diff[ix] * diff[iy] * invcovpartial[ix][iy]
+
+    tchisqpartial[0] = chi2
 
     if not options.toys > 0:
       dName = 'asimov' if options.toys < 0 else 'data fit'

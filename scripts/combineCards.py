@@ -4,7 +4,7 @@ from sys import argv
 import os.path
 from pprint import pprint
 from optparse import OptionParser
-from collections import OrderdDict
+import collections
 parser = OptionParser(
     usage="%prog [options] [label=datacard.txt | datacard.txt]",
     epilog="The label=datacard.txt syntax allows to specify the label that channels from datacard.txt will have in the combined datacard. To combine cards with different energies one can use dc_7TeV=datacard7.txt dc_8TeV=datacard8.txt (avoid using labels starting with numbers)."
@@ -38,7 +38,7 @@ obsline = []; obskeyline = [] ;
 keyline = []; expline = []; systlines = {}
 signals = []; backgrounds = []; shapeLines = []
 paramSysts = {}; flatParamNuisances = {}; discreteNuisances = {}; groups = {}; rateParams = {}; rateParamsOrder = set()
-chargeGroups = collections.OrderedDict(); polGroups = collections.OrderedDict(); sumGroups = collections.OrderdDict(); chargeMetaGroups = collections.OrderedDict();
+chargeGroups = collections.OrderedDict(); polGroups = collections.OrderedDict(); sumGroups = collections.OrderedDict(); chargeMetaGroups = collections.OrderedDict();
 extArgs = {}; binParFlags = {}
 nuisanceEdits = [];
 
