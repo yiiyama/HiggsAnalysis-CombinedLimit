@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 import re
-import os
-from sys import argv, stdout, stderr, exit, modules, path
-from argparse import ArgumentParser
+from sys import argv, stdout, stderr, exit, modules
+from optparse import OptionParser
 import multiprocessing
 
 try:
@@ -83,6 +82,8 @@ seed = options.seed
 print(seed)
 np.random.seed(seed)
 tf.set_random_seed(seed)
+
+options.fileName = args[0]
 
 cacheSize = 4*1024**2
 #TODO open file an extra time and enforce sufficient cache size for second file open
