@@ -364,6 +364,9 @@ nobsnull = tf.equal(nobs,tf.zeros_like(nobs))
 nexpsafe = tf.where(nobsnull, tf.ones_like(nobs), nexp)
 lognexp = tf.log(nexpsafe)
 
+nobssafe = tf.where(nobsnull, tf.ones_like(nobs), nobs)
+lognobs = tf.log(nobssafe)
+
 nexpnom = tf.Variable(nexp, trainable=False, name="nexpnom")
 nexpnomsafe = tf.where(nobsnull, tf.ones_like(nobs), nexpnom)
 lognexpnom = tf.log(nexpnomsafe)
@@ -373,8 +376,12 @@ lognexpnom = tf.log(nexpnomsafe)
 #poisson term  
 lnfull = tf.reduce_sum(-nobs*lognexp + nexp, axis=-1)
 
+lsatfull = tf.reduce_sum(-nobs*lognobs + nobs, axis=-1)
+
 #poisson term with offset to improve numerical precision
 ln = tf.reduce_sum(-nobs*(lognexp-lognexpnom) + nexp-nexpnom, axis=-1)
+
+lsat = tf.reduce_sum(-nobs*(lognobs-lognexpnom) + nobs-nexpnom, axis=-1)
 
 #constraints
 lc = tf.reduce_sum(0.5*tf.square(theta - theta0))
@@ -393,6 +400,9 @@ if options.binByBinStat:
   
   l = l + lbeta
   lfull = lfull + lbetafull
+
+  lsat = lsat + lbeta
+  lsatfull = lsatfull + lbeta
  
 #name outputs
 poi = tf.identity(poi, name=options.POIMode)
@@ -1055,7 +1065,7 @@ for itoy in range(ntoys):
     array2hist(nobsval, obsHist)
     
     prefithists = fillHists('prefit')
-  
+
   if dofit:
     minimize()
 
@@ -1079,7 +1089,7 @@ for itoy in range(ntoys):
     status = 1
   
   print("status = %i, errstatus = %i, nllval = %f, nllvalfull = %f, edmval = %e, mineigval = %e" % (status,errstatus,nllval,nllvalfull,edmval,mineigval))  
-  
+ 
   if errstatus==0:
     fullsigmasv = np.sqrt(np.diag(invhessval))
     thetasigmasv = fullsigmasv[npoi:]
@@ -1088,6 +1098,13 @@ for itoy in range(ntoys):
   
   thetaminosups = -99.*np.ones_like(thetavals)
   thetaminosdowns = -99.*np.ones_like(thetavals)
+
+  nllsatval, nllsatvalfull = sess.run([lsat, lsatfull])
+
+  print('nllsatval = %f, nllsatvalfull = %f' % (nllsatval, nllsatvalfull))
+
+  tchisq[0] = 2. * (nllvalfull - nllsatvalfull)
+  tchisqpartial[0] = 2. * (nllval - nllsatval)
   
   outsigmass = []
   outminosupss = []
@@ -1103,25 +1120,6 @@ for itoy in range(ntoys):
     outthetanames = outputname + systs.tolist()
     nout = len(outputname)
     nparmsout = len(outthetanames)
-
-    # TODO do this on tf not np
-    covpartial = np.zeros([npoi, npoi], dtype=dtype)
-
-    for ix, name1 in enumerate(pois):
-        for iy, name2 in enumerate(pois):
-            covpartial[ix][iy] = invhessoutval[ix][iy]
-    
-    invcovpartial = np.linalg.inv(covpartial)
-    
-    diff = [(v - 1.) for v in outvals]
-    
-    chi2 = 0.
-    
-    for ix in range(npoi):
-        for iy in range(npoi):
-            chi2 += diff[ix] * diff[iy] * invcovpartial[ix][iy]
-
-    tchisqpartial[0] = chi2
 
     if not options.toys > 0:
       dName = 'asimov' if options.toys < 0 else 'data fit'
